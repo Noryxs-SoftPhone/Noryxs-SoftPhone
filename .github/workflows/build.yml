@@ -205,3 +205,41 @@ jobs:
         with:
           name: NORYXS-Terminal-Linux
           path: "*.deb"
+
+  # --------------------------------------------------------------- Release
+  # Al integrar en main: publica una Release con los tres paquetes de escritorio.
+  release:
+    name: Release
+    if: github.ref == 'refs/heads/main'
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versión
+        id: ver
+        run: |
+          v=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)
+          echo "tag=v$v-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "name=NORYXS Virtual SIP Terminal $v (build ${{ github.run_number }})" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publicar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la dist
+          gh release create "${{ steps.ver.outputs.tag }}" dist/* \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.ver.outputs.name }}" \
+            --notes "Paquetes de escritorio compilados desde ${GITHUB_SHA::7}:
+
+          - **Linux**: \`.deb\` (Ubuntu/Debian) → \`sudo apt install ./NORYXS-Terminal_*.deb\`
+          - **macOS** (Apple Silicon): \`.zip\` con *NORYXS Terminal.app*
+          - **Windows** (x64): \`.zip\` con \`noryxs_terminal.exe\`"
