@@ -210,7 +210,11 @@ jobs:
   # Al integrar en main: publica una Release con los tres paquetes de escritorio.
   release:
     name: Release
-    if: github.ref == 'refs/heads/main'
+    # Se publica aunque falte macOS (los Mac de GitHub a veces no están disponibles):
+    # basta con que Linux y Windows hayan compilado; macOS se añade si también lo ha hecho.
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      needs.linux.result == 'success' && needs.windows.result == 'success'
     needs: [macos, windows, linux]
     runs-on: ubuntu-24.04
     permissions:
@@ -222,7 +226,7 @@ jobs:
         id: ver
         run: |
           v=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)
-          echo "tag=v$v-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v-build.${{ github.run_number }}.${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
           echo "name=NORYXS Virtual SIP Terminal $v (build ${{ github.run_number }})" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
@@ -241,5 +245,5 @@ jobs:
             --notes "Paquetes de escritorio compilados desde ${GITHUB_SHA::7}:
 
           - **Linux**: \`.deb\` (Ubuntu/Debian) → \`sudo apt install ./NORYXS-Terminal_*.deb\`
-          - **macOS** (Apple Silicon): \`.zip\` con *NORYXS Terminal.app*
+          - **macOS** (Apple Silicon): \`.zip\` con *NORYXS Terminal.app* (si no aparece, esa compilación no tuvo Mac disponible)
           - **Windows** (x64): \`.zip\` con \`noryxs_terminal.exe\`"
