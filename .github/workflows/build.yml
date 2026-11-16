@@ -121,6 +121,28 @@ jobs:
             mingw-w64-ucrt-x86_64-ninja
             curl
 
+      # whisper.cpp se compila ANTES de bajar OpenSSL a 3.6: el cmake de MSYS2 está enlazado
+      # con OpenSSL 4 y, tras el cambio, le falta su DLL y sale con código 127 sin mensaje.
+      - name: Caché de whisper.cpp y del modelo
+        id: whcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/whisper.cpp
+            app/assets/models/ggml-base-q5_1.bin
+          key: whisper-windows-${{ hashFiles('packaging/compilar_whisper.sh', 'packaging/descargar_modelo.sh') }}
+
+      - name: Transcripción local (whisper.cpp + modelo Base)
+        if: steps.whcache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: bash packaging/compilar_whisper.sh
+
+      # El modelo se descarga con el bash de Git (trae curl y sha1sum), no con MSYS2
+      - name: Modelo de transcripción
+        if: steps.whcache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash packaging/descargar_modelo.sh
+
       # PJSIP 2.17 no es compatible con OpenSSL 4.x (MSYS2 ya trae 4.1): se fija la última 3.x
       - name: OpenSSL 3.6 (compatible con PJSIP 2.17)
         shell: msys2 {0}
@@ -149,26 +171,6 @@ jobs:
             $PJSIP_COMMON_FLAGS CFLAGS="-O2 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers"
           make -j"$(nproc)"
           make install
-
-      - name: Caché de whisper.cpp y del modelo
-        id: whcache
-        uses: actions/cache@v4
-        with:
-          path: |
-            third_party/whisper.cpp
-            app/assets/models/ggml-base-q5_1.bin
-          key: whisper-windows-${{ hashFiles('packaging/compilar_whisper.sh', 'packaging/descargar_modelo.sh') }}
-
-      - name: Transcripción local (whisper.cpp + modelo Base)
-        if: steps.whcache.outputs.cache-hit != 'true'
-        shell: msys2 {0}
-        run: bash packaging/compilar_whisper.sh
-
-      # El modelo se descarga con el bash de Git (trae curl y sha1sum), no con MSYS2
-      - name: Modelo de transcripción
-        if: steps.whcache.outputs.cache-hit != 'true'
-        shell: bash
-        run: bash packaging/descargar_modelo.sh
 
       - name: Motor nativo (noryxs_engine.dll)
         shell: msys2 {0}

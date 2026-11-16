@@ -5,6 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 WH=third_party/whisper.cpp
+# Comprobación: si cmake no arranca (p. ej. le falta una DLL en MSYS2), decirlo claramente
+cmake --version >/dev/null 2>&1 || { echo "ERROR: cmake no está instalado o no arranca"; exit 1; }
 [ -d "$WH" ] || git clone --depth 1 --branch v1.9.5 https://github.com/ggml-org/whisper.cpp "$WH"
 EXTRA=()
 case "$(uname -s)" in

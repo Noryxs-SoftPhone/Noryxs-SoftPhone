@@ -11,6 +11,9 @@ Formato: cambios agrupados por fecha, del más reciente al más antiguo. Cada en
 - **Solución**:
   - `.gitattributes` fuerza LF en `*.sh`, Makefiles y C.
   - La descarga del modelo pasa al bash de Git (curl y sha1sum incluidos) y se añade `curl` a MSYS2.
+- **Segundo fallo (127 tras el `git clone` de whisper.cpp)**: el `cmake` de MSYS2 dejaba de funcionar sin dar mensaje.
+  - Causa probable: el paso que baja OpenSSL de 4.x a 3.6 (necesario para PJSIP 2.17) quita la DLL de OpenSSL 4 que necesita cmake.
+  - Solución: whisper.cpp y el modelo se preparan **antes** de bajar OpenSSL. `compilar_whisper.sh` comprueba primero que cmake arranca y, si no, lo dice claramente.
 - **Prueba**: pendiente del siguiente job de Windows.
 
 ## 16/11/2026 — Fase 8: mejoras
