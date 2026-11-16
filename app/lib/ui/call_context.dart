@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/i18n.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_controller.dart';
@@ -32,7 +33,7 @@ class TagPill extends StatelessWidget {
         duration: const Duration(milliseconds: 140),
         padding: EdgeInsets.symmetric(horizontal: small ? 6 : 9, vertical: small ? 1.5 : 3.5),
         decoration: BoxDecoration(
-          color: selected ? c.bg : Colors.white,
+          color: selected ? c.bg : NxColors.card,
           borderRadius: BorderRadius.circular(99),
           border: Border.all(color: selected ? c.border : NxColors.border),
         ),
@@ -92,8 +93,8 @@ class _QuickNoteFieldState extends State<QuickNoteField> {
         onChanged: widget.onChanged,
         inputFormatters: [LengthLimitingTextInputFormatter(CallHistoryManager.maxNote)],
         style: const TextStyle(fontSize: 12, height: 1.35),
-        decoration: const InputDecoration(
-          hintText: 'Ej. Llamar mañana a las 10:00 — Ref. 402',
+        decoration: InputDecoration(
+          hintText: tr('Ej. Llamar mañana a las 10:00 — Ref. 402'),
           counterText: '',
           contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         ),
@@ -134,7 +135,7 @@ class _CallContextBlockState extends State<CallContextBlock> {
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.edit_note_rounded, size: 16, color: has ? NxColors.goldDark : NxColors.gray500),
             const SizedBox(width: 4),
-            Text(has ? 'Nota y etiquetas' : 'Añadir nota',
+            Text(has ? tr('Nota y etiquetas') : tr('Añadir nota'),
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: has ? NxColors.goldDark : NxColors.gray500)),
             Icon(_open ? Icons.expand_less : Icons.expand_more, size: 15, color: NxColors.gray400),
           ]),
@@ -155,9 +156,9 @@ class _CallContextBlockState extends State<CallContextBlock> {
                   const SizedBox(height: 6),
                   Row(children: [
                     Expanded(child: TagRow(selected: widget.tags, onToggle: widget.onToggleTag)),
-                    const Icon(Icons.lock_outline, size: 11, color: NxColors.gray400),
+                    Icon(Icons.lock_outline, size: 11, color: NxColors.gray400),
                     const SizedBox(width: 3),
-                    const Text('Cifrado local', style: TextStyle(fontSize: 9.5, color: NxColors.gray400)),
+                    Text(tr('Cifrado local'), style: TextStyle(fontSize: 9.5, color: NxColors.gray400)),
                   ]),
                 ]),
               ),
@@ -199,8 +200,8 @@ class CallerContext extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(
               last.note.trim().isNotEmpty
-                  ? 'Última nota (${two(last.start.day)}/${two(last.start.month)}): ${last.note.trim().replaceAll('\n', ' ')}'
-                  : 'Última llamada (${two(last.start.day)}/${two(last.start.month)})',
+                  ? tr('Última nota ({0}/{1}): {2}', [two(last.start.day), two(last.start.month), last.note.trim().replaceAll('\n', ' ')])
+                  : tr('Última llamada ({0}/{1})', [two(last.start.day), two(last.start.month)]),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: dark ? const Color(0xFFE6D3A3) : NxColors.goldDark),

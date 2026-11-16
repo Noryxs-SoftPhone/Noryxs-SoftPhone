@@ -21,6 +21,12 @@
 
 class NxCallCard;
 
+// Clic para llamar: enlace tel:/sip:/callto: recibido al arrancar (lo rellena main.cpp).
+extern std::string g_nx_initial_url;
+// Identificador del WM_COPYDATA con el que una segunda instancia pasa su enlace a la primera.
+constexpr ULONG_PTR kNxUrlCopyData = 0x5A11;
+bool NxIsDialUrl(const std::string& s);
+
 class NxDesktop {
  public:
   NxDesktop(HWND window, flutter::BinaryMessenger* messenger);
@@ -47,6 +53,11 @@ class NxDesktop {
   void AddTrayIcon();
   void RemoveTrayIcon();
   void ShowTrayMenu();
+  void DeliverUrl(const std::string& url);
+  bool SetDefaultDialer();
+  bool IsDefaultDialer() const;
+  void SetHotkeys(bool on);
+  void SetMediaKey(bool on);
 
   HWND window_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
@@ -58,6 +69,10 @@ class NxDesktop {
   bool quitting_ = false;
   bool tray_added_ = false;
   UINT taskbar_created_msg_ = 0;
+  std::vector<std::string> pending_urls_;
+  bool url_ready_ = false;
+  bool hotkeys_ = false;
+  bool media_key_ = false;
 };
 
 #endif  // RUNNER_NX_DESKTOP_H_

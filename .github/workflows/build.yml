@@ -25,8 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Dependencias (OpenSSL, Opus)
-        run: brew install openssl@3 opus pkgconf
+      - name: Dependencias (OpenSSL, Opus, CMake)
+        run: brew install openssl@3 opus pkgconf cmake
 
       - name: Caché de PJSIP
         id: pjcache
@@ -48,8 +48,29 @@ jobs:
           make -j"$(sysctl -n hw.ncpu)"
           make install
 
+      - name: Caché de whisper.cpp y del modelo
+        id: whcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/whisper.cpp
+            app/assets/models/ggml-base-q5_1.bin
+          key: whisper-macos-${{ hashFiles('packaging/compilar_whisper.sh', 'packaging/descargar_modelo.sh') }}
+
+      - name: Transcripción local (whisper.cpp + modelo Base)
+        if: steps.whcache.outputs.cache-hit != 'true'
+        run: |
+          packaging/compilar_whisper.sh
+          packaging/descargar_modelo.sh
+
       - name: Motor nativo
         run: make -C native/engine
+
+      - name: Versión de la app
+        shell: bash
+        run: |
+          echo "APP_VERSION=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -65,7 +86,7 @@ jobs:
 
       - name: Compilar app macOS
         working-directory: app
-        run: flutter build macos --release --dart-define=BUILD=${{ github.sha }}
+        run: flutter build macos --release --dart-define=BUILD=${{ github.sha }} --dart-define=APP_VERSION=${{ env.APP_VERSION }} --dart-define=BUILD_DATE=${{ env.BUILD_DATE }}
 
       - name: Empaquetar
         run: |
@@ -96,6 +117,9 @@ jobs:
             mingw-w64-ucrt-x86_64-openssl
             mingw-w64-ucrt-x86_64-opus
             mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            curl
 
       # PJSIP 2.17 no es compatible con OpenSSL 4.x (MSYS2 ya trae 4.1): se fija la última 3.x
       - name: OpenSSL 3.6 (compatible con PJSIP 2.17)
@@ -126,11 +150,38 @@ jobs:
           make -j"$(nproc)"
           make install
 
+      - name: Caché de whisper.cpp y del modelo
+        id: whcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/whisper.cpp
+            app/assets/models/ggml-base-q5_1.bin
+          key: whisper-windows-${{ hashFiles('packaging/compilar_whisper.sh', 'packaging/descargar_modelo.sh') }}
+
+      - name: Transcripción local (whisper.cpp + modelo Base)
+        if: steps.whcache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: bash packaging/compilar_whisper.sh
+
+      # El modelo se descarga con el bash de Git (trae curl y sha1sum), no con MSYS2
+      - name: Modelo de transcripción
+        if: steps.whcache.outputs.cache-hit != 'true'
+        shell: bash
+        run: bash packaging/descargar_modelo.sh
+
       - name: Motor nativo (noryxs_engine.dll)
         shell: msys2 {0}
         run: |
           make -C native/engine -f Makefile.win
           objdump -p native/engine/build-win/noryxs_engine.dll | grep "DLL Name"
+          objdump -p native/engine/build-win/noryxs_engine.dll | grep -q nx_transcribe && echo "Transcripción incluida"
+
+      - name: Versión de la app
+        shell: bash
+        run: |
+          echo "APP_VERSION=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -140,7 +191,7 @@ jobs:
 
       - name: Compilar app Windows
         working-directory: app
-        run: flutter build windows --release --dart-define=BUILD=${{ github.sha }}
+        run: flutter build windows --release --dart-define=BUILD=${{ github.sha }} --dart-define=APP_VERSION=${{ env.APP_VERSION }} --dart-define=BUILD_DATE=${{ env.BUILD_DATE }}
 
       - name: Empaquetar
         shell: pwsh
@@ -183,10 +234,31 @@ jobs:
           make -j"$(nproc)"
           make install
 
+      - name: Caché de whisper.cpp y del modelo
+        id: whcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/whisper.cpp
+            app/assets/models/ggml-base-q5_1.bin
+          key: whisper-linux-${{ hashFiles('packaging/compilar_whisper.sh', 'packaging/descargar_modelo.sh') }}
+
+      - name: Transcripción local (whisper.cpp + modelo Base)
+        if: steps.whcache.outputs.cache-hit != 'true'
+        run: |
+          packaging/compilar_whisper.sh
+          packaging/descargar_modelo.sh
+
       - name: Motor nativo (libnoryxs_engine.so)
         run: |
           make -C native/engine -f Makefile.linux
           ldd native/engine/build-linux/libnoryxs_engine.so
+
+      - name: Versión de la app
+        shell: bash
+        run: |
+          echo "APP_VERSION=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date -u +%Y-%m-%d)" >> "$GITHUB_ENV"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -196,7 +268,7 @@ jobs:
 
       - name: Compilar app Linux
         working-directory: app
-        run: flutter build linux --release --dart-define=BUILD=${{ github.sha }}
+        run: flutter build linux --release --dart-define=BUILD=${{ github.sha }} --dart-define=APP_VERSION=${{ env.APP_VERSION }} --dart-define=BUILD_DATE=${{ env.BUILD_DATE }}
 
       - name: Paquete .deb
         run: packaging/linux/build_deb.sh

@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../core/i18n.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +8,10 @@ import '../core/app_controller.dart';
 import '../core/call_state_machine.dart';
 import '../core/feature_managers.dart';
 import '../core/models.dart';
+import '../core/phone_info.dart';
 import '../engine/sip_engine.dart';
 import 'call_context.dart';
+import 'whatsapp_ui.dart';
 import 'home.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -45,7 +48,8 @@ class TerminalTabState extends State<TerminalTab> {
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final f = app.calls.focused;
-      if (_showStats && f != null && f.state.isLive) _stats = app.calls.stats(f);
+      // Telemetría siempre en llamada activa: alimenta el aviso de mala conexión (cada 2 s)
+      if (f != null && f.state.isLive && (_showStats || DateTime.now().second.isEven)) _stats = app.calls.stats(f);
       if (app.calls.liveCalls.isNotEmpty) setState(() {});
     });
     app.calls.addListener(_onCalls);
@@ -76,6 +80,19 @@ class TerminalTabState extends State<TerminalTab> {
     _dialFocus.dispose();
     _kbFocus.dispose();
     super.dispose();
+  }
+
+  /// ¿El foco está en un campo de texto (nota, búsqueda, transferencia…)?
+  bool _editingText() {
+    final f = FocusManager.instance.primaryFocus;
+    if (f == null || f == _kbFocus) return false;
+    return f.context?.findAncestorWidgetOfExactType<EditableText>() != null || f.context?.widget is EditableText;
+  }
+
+  /// Pone el teclado del ordenador a escribir en el marcador (al abrir la pestaña o tras un clic).
+  void grabKeyboard() {
+    if (!mounted || _editingText()) return;
+    if (!_kbFocus.hasPrimaryFocus) _kbFocus.requestFocus();
   }
 
   void dialAndCall(String number) {
@@ -118,7 +135,7 @@ class TerminalTabState extends State<TerminalTab> {
       if (last != null) {
         setState(() => _dial.text = last.number);
       } else {
-        app.showToast('Introduce un número o extensión para llamar');
+        app.showToast(tr('Introduce un número o extensión para llamar'));
       }
       return;
     }
@@ -140,12 +157,35 @@ class TerminalTabState extends State<TerminalTab> {
     final anySrtp = lines.any((l) => l.account.isComplete && l.account.srtp > 0);
     final reg = app.overallReg;
 
-    return Focus(
+    return Listener(
+      // Tras tocar cualquier botón, el teclado vuelve al marcador (salvo si se escribe en un campo)
+      onPointerUp: (_) => WidgetsBinding.instance.addPostFrameCallback((_) => grabKeyboard()),
+      child: Focus(
       focusNode: _kbFocus,
+      autofocus: true,
       onKeyEvent: (node, event) {
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+        if (_editingText()) return KeyEventResult.ignored; // escribiendo en una nota, búsqueda…
+        final home = context.findAncestorStateOfType<HomeScreenState>();
+        if (home != null && home.tab != NxTab.terminal) return KeyEventResult.ignored; // otra pestaña a la vista
         final ch = event.character;
-        if (_inCall && event is KeyDownEvent && ch != null && ch.length == 1 && '0123456789*#'.contains(ch)) {
+        final key = event.logicalKey;
+        // Con llamada: tonos DTMF. Sin llamada: el número se escribe en el marcador.
+        if (ch != null && ch.length == 1 && '0123456789*#+'.contains(ch) && (ch != '+' || !_inCall)) {
           _press(ch);
+          return KeyEventResult.handled;
+        }
+        if (_inCall || _dtmfMode) return KeyEventResult.ignored;
+        if (key == LogicalKeyboardKey.backspace || key == LogicalKeyboardKey.delete) {
+          _backspace();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+          _call();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.escape && _dial.text.isNotEmpty) {
+          _dial.clear();
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -155,31 +195,30 @@ class TerminalTabState extends State<TerminalTab> {
       children: [
         // 1. Líneas
         Row(children: [
-          const Expanded(child: SectionLabel('Líneas SIP simultáneas')),
+          Expanded(child: SectionLabel(tr('Líneas SIP simultáneas'))),
           Led(regColor(reg), size: 6),
           const SizedBox(width: 4),
           Text(
             reg == RegState.registered
-                ? (anyTls ? (anySrtp ? 'TLS/SRTP' : 'TLS') : 'UDP')
+                ? (anyTls ? (anySrtp ? tr('TLS/SRTP') : 'TLS') : 'UDP')
                 : reg == RegState.registering
-                    ? 'Registrando'
-                    : 'Sin red SIP',
-            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: reg == RegState.registered ? NxColors.greenText : NxColors.redText),
+                    ? tr('Registrando')
+                    : tr('Sin red SIP'),
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: reg == RegState.registered ? NxColors.greenText : NxColors.gray500),
           ),
           const SizedBox(width: 8),
           Tactile(
             onTap: () => setState(() => _expanded = !_expanded),
-            child: Text(_expanded ? '− Ver 2 líneas' : '+ Ver ${lines.length > 2 ? lines.length : 4} líneas',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: NxColors.goldDark)),
+            child: Text(_expanded ? tr('− Ver 2 líneas') : tr('+ Ver {0} líneas', [lines.length > 2 ? lines.length : 4]),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: NxColors.goldDark)),
           ),
         ]),
         const SizedBox(height: 8),
         _LinesGrid(lines: visible, showAdd: _expanded && lines.length < 8, onFocusCall: (c) => setState(() => app.calls.focus(c))),
-        const SizedBox(height: 12),
 
-        // 1B. Teclas BLF y órbitas
+        // 1B. Teclas BLF y órbitas (tira compacta; no aparece si no hay teclas)
         _BlfPanel(onMessage: app.showToast),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
 
         // 2. Pantalla LCD
         _Lcd(
@@ -203,7 +242,7 @@ class TerminalTabState extends State<TerminalTab> {
         _DialInput(controller: _dial, focus: _dialFocus, dtmf: _dtmfMode || _inCall, onBackspace: _backspace, onSubmit: _call),
         const SizedBox(height: 8),
         Row(children: [
-          const Text('Salida por:', style: TextStyle(fontSize: 11, color: NxColors.gray500)),
+          Text(tr('Salida por:'), style: TextStyle(fontSize: 11, color: NxColors.gray500)),
           const SizedBox(width: 8),
           Expanded(
             child: SingleChildScrollView(
@@ -228,23 +267,16 @@ class TerminalTabState extends State<TerminalTab> {
         Row(children: [
           Expanded(
             flex: 3,
-            child: NxButton(label: 'Limpiar', height: 44, radius: 16, onTap: () => setState(() => _dial.clear())),
+            child: NxButton(label: tr('Limpiar'), height: 46, radius: 16, onTap: () => setState(() => _dial.clear())),
           ),
           const SizedBox(width: 10),
           Expanded(
             flex: 9,
-            child: NxButton(
-              label: 'Llamar desde ${sel.label} (${sel.extension})',
-              icon: Icons.call,
-              tone: NxTone.dark,
-              height: 44,
-              radius: 16,
-              fontSize: 13.5,
-              onTap: _call,
-            ),
+            child: _CallButton(label: tr('Llamar desde {0} ({1})', [sel.label, sel.extension]), onTap: _call),
           ),
         ]),
       ],
+    ),
     ),
     );
   }
@@ -283,38 +315,39 @@ class _LineCard extends StatelessWidget {
     final focused = call != null ? app.calls.focusedId == call.callId : (app.lines.selected == line.index && app.calls.focused == null);
     final vm = app.voicemail.newFor(line);
     final count = app.calls.callsOnAcc(line.accId).length;
+    final feat = app.features.of(line); // desvío / No molestar de ESTA línea
 
     Color led = NxColors.green;
     bool pulse = false;
     Color border = focused ? NxColors.gold : NxColors.border;
-    Color bg = focused ? Colors.white : NxColors.surface;
+    Color bg = focused ? NxColors.card : NxColors.surface;
     Widget badge;
     switch (status) {
       case LineStatus.disconnected:
         led = NxColors.red500;
-        badge = const Text('Desconectada', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.red));
+        badge = Text(tr('Desconectada'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: NxColors.gray500));
       case LineStatus.ringing:
         led = NxColors.gold;
         pulse = true;
         border = NxColors.gold;
         bg = NxColors.goldSoft;
-        badge = const Text('Sonando…', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.goldDark));
+        badge = Text(tr('Sonando…'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.goldDark));
       case LineStatus.held:
         led = NxColors.amber;
         border = NxColors.amberBorder.withValues(alpha: 0.8);
         bg = NxColors.amberSoft;
-        badge = const Text('Retenida', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.amberText));
+        badge = Text(tr('Retenida'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.amberText));
       case LineStatus.busy:
         final outgoing = call != null && (call.state == CallState.outgoing || call.state == CallState.ringing || call.state == CallState.connecting);
         led = outgoing ? NxColors.sky : NxColors.green;
         border = outgoing ? NxColors.border : NxColors.green.withValues(alpha: 0.7);
-        bg = outgoing ? bg : const Color(0x4DECFDF5);
+        bg = outgoing ? bg : NxColors.greenSoft;
         badge = outgoing
-            ? const Text('Llamando…', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.skyText))
+            ? Text(tr('Llamando…'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.skyText))
             : Text(fmtDuration(call?.duration ?? Duration.zero),
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.greenText, fontFamily: kMono));
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.greenText, fontFamily: kMono));
       case LineStatus.free:
-        badge = const Text('Libre', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: NxColors.gray400));
+        badge = Text(tr('Libre'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: NxColors.gray400));
     }
 
     return Tactile(
@@ -330,7 +363,9 @@ class _LineCard extends StatelessWidget {
           color: bg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: border),
-          boxShadow: focused || status == LineStatus.ringing ? [BoxShadow(color: NxColors.gold.withValues(alpha: 0.18), spreadRadius: 3)] : null,
+          boxShadow: focused || status == LineStatus.ringing
+              ? [BoxShadow(color: NxColors.gold.withValues(alpha: 0.14), spreadRadius: 2), BoxShadow(color: Colors.black.withValues(alpha: NxColors.night ? 0.2 : 0.04), blurRadius: 8, offset: const Offset(0, 2))]
+              : [BoxShadow(color: Colors.black.withValues(alpha: NxColors.night ? 0.15 : 0.03), blurRadius: 6, offset: const Offset(0, 1))],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -347,19 +382,27 @@ class _LineCard extends StatelessWidget {
           if (call != null) ...[
             Text(call.displayName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
             Text(call.displayName != call.remoteNumber ? call.remoteNumber : call.state.label,
-                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: NxColors.gray500, fontFamily: kMono)),
+                overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: NxColors.gray500, fontFamily: kMono)),
           ] else ...[
-            Text(line.account.name.isEmpty ? 'Sin configurar' : line.account.name,
-                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: NxColors.gray500)),
+            Text(line.account.name.isEmpty ? tr('Sin configurar') : line.account.name,
+                overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: NxColors.gray500)),
             Row(children: [
               Expanded(
                 child: Text(line.account.server.isEmpty ? '—' : line.account.server,
-                    overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: NxColors.gray400, fontFamily: kMono)),
+                    overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: NxColors.gray400, fontFamily: kMono)),
               ),
+              if (feat.dnd) ...[
+                Pill('DND', size: 9, fg: NxColors.redText, bg: NxColors.redSoft, border: NxColors.redBorder),
+                const SizedBox(width: 4),
+              ],
+              if (feat.mode != ForwardMode.off) ...[
+                Pill('→ ${feat.target}', mono: true, size: 9, fg: NxColors.goldDark, bg: NxColors.goldSoft),
+                const SizedBox(width: 4),
+              ],
               if (vm > 0)
                 Tactile(
                   onTap: () => context.findAncestorStateOfType<HomeScreenState>()?.go(NxTab.voicemail),
-                  child: Pill('Buzón ($vm)', mono: true, size: 9, fg: NxColors.goldDark, bg: NxColors.goldSoft),
+                  child: Pill(tr('Buzón ({0})', [vm]), mono: true, size: 9, fg: NxColors.goldDark, bg: NxColors.goldSoft),
                 ),
             ]),
           ],
@@ -381,7 +424,7 @@ class _AddLineCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: NxColors.goldBorder),
           ),
-          child: const Center(child: Text('+ Añadir línea', style: TextStyle(color: NxColors.goldDark, fontWeight: FontWeight.w700, fontSize: 11.5))),
+          child: Center(child: Text(tr('+ Añadir línea'), style: TextStyle(color: NxColors.goldDark, fontWeight: FontWeight.w700, fontSize: 11.5))),
         ),
       );
 }
@@ -390,6 +433,8 @@ class _AddLineCard extends StatelessWidget {
 // Teclas BLF y órbitas de aparcamiento
 // ---------------------------------------------------------------------------
 
+/// Teclas BLF en una tira compacta de una fila (se desplaza si hay muchas).
+/// Sin teclas configuradas no ocupa espacio.
 class _BlfPanel extends StatelessWidget {
   const _BlfPanel({required this.onMessage});
   final ValueChanged<String> onMessage;
@@ -398,37 +443,18 @@ class _BlfPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = AppController.I;
     final keys = app.blf.keys;
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: NxColors.surface.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: NxColors.border),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-          child: Row(children: [
-            const Expanded(child: SectionLabel('Teclas rápidas BLF & órbitas park', size: 10)),
-            Tactile(
-              onTap: () => app.dialVoicemail(app.lines.selectedLine),
-              child: const Text('Buzón (*97)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.goldDark)),
-            ),
-          ]),
+    if (keys.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        height: 36,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: keys.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 6),
+          itemBuilder: (_, i) => _BlfKeyTile(k: keys[i], onTap: () => onMessage(app.blf.press(keys[i], app.lines.selectedLine))),
         ),
-        if (keys.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 6),
-            child: Text('Configura las teclas en la pestaña SIP', textAlign: TextAlign.center, style: TextStyle(fontSize: 10.5, color: NxColors.gray400)),
-          )
-        else
-          LayoutBuilder(builder: (context, c) {
-            final w = (c.maxWidth - 12) / 3;
-            return Wrap(spacing: 6, runSpacing: 6, children: [
-              for (final k in keys) SizedBox(width: w, child: _BlfKeyTile(k: k, onTap: () => onMessage(app.blf.press(k, app.lines.selectedLine)))),
-            ]);
-          }),
-      ]),
+      ),
     );
   }
 }
@@ -442,52 +468,54 @@ class _BlfKeyTile extends StatelessWidget {
   Widget build(BuildContext context) {
     Color dot = NxColors.green;
     bool pulse = false;
-    String tag = 'Libre';
+    String tag = tr('Libre');
     Color border = NxColors.border;
-    Color bg = Colors.white;
+    Color bg = NxColors.card;
     if (k.park) {
       if (k.state == BlfState.parked) {
         dot = NxColors.amber;
         pulse = true;
-        tag = 'Aparcada • Rec.';
+        tag = tr('Aparcada • Rec.');
         border = NxColors.amberBorder;
         bg = NxColors.amberSoft;
       } else {
-        dot = const Color(0xFFD1D5DB);
-        tag = 'Órbita libre';
+        dot = NxColors.gray400;
+        tag = tr('Órbita libre');
       }
     } else {
       switch (k.state) {
         case BlfState.busy:
           dot = NxColors.red500;
-          tag = 'Ocupada';
+          tag = tr('Ocupada');
         case BlfState.ringing:
           dot = NxColors.gold;
           pulse = true;
-          tag = 'Capturar **';
+          tag = tr('Capturar **');
           border = NxColors.gold;
           bg = NxColors.goldSoft.withValues(alpha: 0.6);
         case BlfState.unknown:
-          dot = const Color(0xFFD1D5DB);
-          tag = 'Sin estado';
+          dot = NxColors.gray400;
+          tag = tr('Sin estado');
         default:
           break;
       }
     }
     return Tactile(
       onTap: onTap,
-      tooltip: k.remote.isNotEmpty ? 'Con ${k.remote}' : null,
+      tooltip: '${k.park ? 'Slot' : 'Ext.'} ${k.ext} · $tag${k.remote.isNotEmpty ? ' · ${tr('Con {0}', [k.remote])}' : ''}',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        alignment: Alignment.center,
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Led(dot, size: 6, pulse: pulse),
-            const SizedBox(width: 5),
-            Expanded(child: Text(k.label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-          ]),
-          Text('${k.park ? 'Slot' : 'Ext.'} ${k.ext} • $tag',
-              overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 9, color: NxColors.gray500, fontFamily: kMono)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Led(dot, size: 7, pulse: pulse),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 110),
+            child: Text(k.label, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 5),
+          Text(k.park ? 'P${k.ext}' : k.ext, style: TextStyle(fontSize: 10, color: NxColors.gray500, fontFamily: kMono)),
         ]),
       ),
     );
@@ -534,13 +562,14 @@ class _Lcd extends StatelessWidget {
           Container(
             margin: const EdgeInsets.only(top: 10),
             padding: const EdgeInsets.only(top: 9),
-            decoration: const BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
+            decoration: BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
             child: CallContextBlock(
               key: ValueKey('ctx-${call.callId}'),
               note: call.note,
               tags: call.tags,
               onNote: (v) => call.note = v,
               onToggleTag: (id) => app.calls.toggleTag(call, id),
+              trailing: WhatsAppButton(number: call.remoteNumber, name: call.displayName),
             ),
           ),
         if (transferOpen || call.consultFor != null) _TransferPanel(call: call, initial: dialText(), onClose: () => onTransfer(false)),
@@ -553,42 +582,30 @@ class _Lcd extends StatelessWidget {
     final a = line.account;
     final registered = line.reg == RegState.registered;
     final others = app.calls.liveCalls;
-    return NxPanel(
-      padding: const EdgeInsets.all(14),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+      decoration: BoxDecoration(color: NxColors.surface, borderRadius: BorderRadius.circular(14), border: Border.all(color: NxColors.border)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Flexible(
-                  child: Text('${line.label} • Extensión ${line.extension}',
-                      overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                ),
-                const SizedBox(width: 8),
-                Pill(registered ? 'Registrada' : line.reg.label,
-                    round: true, fg: registered ? NxColors.greenText : NxColors.redText, bg: registered ? NxColors.greenSoft : NxColors.redSoft),
-              ]),
-              const SizedBox(height: 2),
-              Text(
-                [
-                  if (a.name.isNotEmpty) a.name,
-                  'Códec ${app.audio.preferredCodecLabel.replaceAll(' HD', '')} (${a.transportLabel})',
-                ].join(' • '),
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: NxColors.gray500),
-              ),
-              if (!registered && line.regReason.isNotEmpty)
-                Text('${line.regCode > 0 ? '${line.regCode} ' : ''}${line.regReason}',
-                    overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 10, color: NxColors.red)),
-            ]),
+          Led(regColor(line.reg), size: 7),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text('${line.label.replaceFirst(tr('LÍNEA'), tr('Línea'))} · ${line.extension}${a.name.isNotEmpty ? ' · ${a.name}' : ''}',
+                overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
           ),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text(registered ? 'LISTO' : 'SIN REGISTRO',
-                style: const TextStyle(fontFamily: kMono, fontSize: 12, fontWeight: FontWeight.w600, color: NxColors.gray700)),
-            Text(a.srtp > 0 ? 'SRTP ON' : (a.transport == SipTransport.tls ? 'TLS ON' : 'RTP'),
-                style: const TextStyle(fontFamily: kMono, fontSize: 10, color: NxColors.goldDark)),
-          ]),
+          const Spacer(),
+          Text(
+              registered
+                  ? '${app.audio.preferredCodecLabel.replaceAll(' HD', '')} · ${a.srtp > 0 ? 'SRTP' : a.transportLabel}'
+                  : line.reg.label,
+              style: TextStyle(fontFamily: kMono, fontSize: 10.5, color: NxColors.gray500)),
         ]),
+        if (!registered && line.regReason.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3, left: 15),
+            child: Text('${line.regCode > 0 ? '${line.regCode} ' : ''}${line.regReason}',
+                overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: NxColors.red)),
+          ),
         for (final o in others)
           Padding(
             padding: const EdgeInsets.only(top: 10),
@@ -599,10 +616,10 @@ class _Lcd extends StatelessWidget {
                 decoration: BoxDecoration(color: NxColors.amberSoft.withValues(alpha: 0.8), borderRadius: BorderRadius.circular(12)),
                 child: Row(children: [
                   Expanded(
-                    child: Text('Sesión en curso en ${app.calls.lineOf(o)?.label ?? 'IP'} (${o.displayName})',
-                        overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: NxColors.amberText)),
+                    child: Text(tr('Sesión en curso en {0} ({1})', [app.calls.lineOf(o)?.label ?? 'IP', o.displayName]),
+                        overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: NxColors.amberText)),
                   ),
-                  const Text('Ver sesión →',
+                  Text(tr('Ver sesión →'),
                       style: TextStyle(fontSize: 11, color: NxColors.amberText, fontWeight: FontWeight.w600, decoration: TextDecoration.underline)),
                 ]),
               ),
@@ -617,12 +634,12 @@ class _Lcd extends StatelessWidget {
     return Row(children: [
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Pill('LLAMADA ENTRANTE EN ${line?.label ?? 'IP'}${line != null ? ' (EXT. ${line.extension})' : ''}',
+          Pill(tr('LLAMADA ENTRANTE EN {0}{1}', [line?.label ?? 'IP', line != null ? ' (EXT. ${line.extension})' : '']),
               round: true, size: 9.5, fg: NxColors.goldDark, bg: NxColors.goldSoft),
           const SizedBox(height: 4),
-          Text(c.displayName.isEmpty ? 'Número oculto' : c.displayName,
+          Text(c.displayName.isEmpty ? tr('Número oculto') : c.displayName,
               overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          if (c.displayName != c.remoteNumber) Text(c.remoteNumber, style: const TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray600)),
+          if (c.displayName != c.remoteNumber) Text(c.remoteNumber, style: TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray600)),
           CallerContext(number: c.remoteNumber),
         ]),
       ),
@@ -630,7 +647,7 @@ class _Lcd extends StatelessWidget {
         width: 40,
         height: 40,
         decoration: BoxDecoration(color: NxColors.goldSoft, shape: BoxShape.circle, border: Border.all(color: NxColors.goldBorder)),
-        child: const Icon(Icons.ring_volume_outlined, color: NxColors.goldDark, size: 20),
+        child: Icon(Icons.ring_volume_outlined, color: NxColors.goldDark, size: 20),
       ),
     ]);
   }
@@ -640,12 +657,12 @@ class _Lcd extends StatelessWidget {
     final s = c.state;
     final rec = app.calls.recordingCallId == c.callId;
     final (badgeText, badgeFg, badgeBg) = switch (s) {
-      CallState.outgoing || CallState.ringing || CallState.connecting => ('Conectando SIP…', const Color(0xFF075985), NxColors.skySoft),
-      CallState.held => ('En espera (Hold)', NxColors.amberText, const Color(0xFFFEF3C7)),
-      CallState.transferring => ('Transfiriendo…', NxColors.goldDark, NxColors.goldSoft),
-      CallState.ended => ('Finalizada', NxColors.gray600, NxColors.surfaceHover),
-      CallState.failed => ('Fallida ${c.statusCode}', NxColors.redText, NxColors.redSoft),
-      _ => (app.calls.conference && !c.remoteHold ? 'Conferencia a 3' : (c.remoteHold ? 'Te han retenido' : 'RTP activo'), const Color(0xFF065F46), const Color(0xFFD1FAE5)),
+      CallState.outgoing || CallState.ringing || CallState.connecting => (tr('Conectando SIP…'), NxColors.skyText, NxColors.skySoft),
+      CallState.held => (tr('En espera (Hold)'), NxColors.amberText, NxColors.amberSoft),
+      CallState.transferring => (tr('Transfiriendo…'), NxColors.goldDark, NxColors.goldSoft),
+      CallState.ended => (tr('Finalizada'), NxColors.gray600, NxColors.surfaceHover),
+      CallState.failed => (tr('Fallida {0}', [c.statusCode]), NxColors.redText, NxColors.redSoft),
+      _ => (app.calls.conference && !c.remoteHold ? tr('Conferencia a 3') : (c.remoteHold ? tr('Te han retenido') : tr('RTP activo')), NxColors.greenText, NxColors.greenSoft),
     };
     final secure = line?.account.srtp != null && line!.account.srtp > 0;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -654,13 +671,13 @@ class _Lcd extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Text('${line?.label ?? 'IP DIRECTA'}${line != null ? ' • Ext. ${line.extension}' : ''}',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: NxColors.gray500)),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: NxColors.gray500)),
               const SizedBox(width: 6),
               Pill(badgeText, round: true, fg: badgeFg, bg: badgeBg),
             ]),
             const SizedBox(height: 2),
             Text(c.displayName, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            if (c.displayName != c.remoteNumber) Text(c.remoteNumber, style: const TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray500)),
+            if (c.displayName != c.remoteNumber) Text(c.remoteNumber, style: TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray500)),
             CallerContext(number: c.remoteNumber, showLastNote: false),
           ]),
         ),
@@ -672,12 +689,12 @@ class _Lcd extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Tactile(
-                  tooltip: rec ? 'Detener grabación' : 'Grabar llamada (WAV local)',
+                  tooltip: rec ? tr('Detener grabación') : tr('Grabar llamada (WAV local)'),
                   onTap: () => app.calls.toggleRecording(c, (x) => recordingPathFor(x, app.calls.lineOf(x))),
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(
-                      color: rec ? NxColors.redSoft : Colors.white,
+                      color: rec ? NxColors.redSoft : NxColors.card,
                       borderRadius: BorderRadius.circular(5),
                       border: Border.all(color: rec ? NxColors.redBorder : NxColors.border),
                     ),
@@ -691,24 +708,36 @@ class _Lcd extends StatelessWidget {
                 ),
               ),
             Tactile(
-              tooltip: 'Ver telemetría RTP / MOS',
+              tooltip: tr('Ver telemetría RTP / MOS'),
               onTap: s.isLive ? onToggleStats : null,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: NxColors.card,
                   borderRadius: BorderRadius.circular(5),
                   border: Border.all(color: showStats ? NxColors.gold : NxColors.border),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text('${_codecLabel(stats, app)} • ${(stats?['srtp'] == true || secure) ? 'SRTP' : 'RTP'}',
-                      style: const TextStyle(fontFamily: kMono, fontSize: 10, color: NxColors.gray600)),
+                      style: TextStyle(fontFamily: kMono, fontSize: 10, color: NxColors.gray600)),
                   const SizedBox(width: 4),
-                  const Text('ⓘ', style: TextStyle(fontSize: 10, color: NxColors.goldDark, fontWeight: FontWeight.w700)),
+                  Text('ⓘ', style: TextStyle(fontSize: 10, color: NxColors.goldDark, fontWeight: FontWeight.w700)),
                 ]),
               ),
             ),
           ]),
+          if (s == CallState.active && _poorNet(stats) != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Tooltip(
+                message: _poorNet(stats)!,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.network_check_rounded, size: 13, color: NxColors.amberText),
+                  const SizedBox(width: 3),
+                  Text(tr('Conexión inestable'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: NxColors.amberText)),
+                ]),
+              ),
+            ),
         ]),
       ]),
       if (dtmfMode)
@@ -717,11 +746,11 @@ class _Lcd extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(color: NxColors.dark, borderRadius: BorderRadius.circular(8)),
           child: Row(children: [
-            const Icon(Icons.dialpad, size: 13, color: NxColors.gold),
+            Icon(Icons.dialpad, size: 13, color: NxColors.gold),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(dtmfSent.isEmpty ? 'Teclado en modo tonos DTMF: pulsa las teclas' : 'Tonos enviados',
-                  style: const TextStyle(color: NxColors.gold, fontSize: 11, fontWeight: FontWeight.w500)),
+              child: Text(dtmfSent.isEmpty ? tr('Teclado en modo tonos DTMF: pulsa las teclas') : tr('Tonos enviados'),
+                  style: TextStyle(color: NxColors.gold, fontSize: 11, fontWeight: FontWeight.w500)),
             ),
             if (dtmfSent.isNotEmpty)
               Text(dtmfSent, style: const TextStyle(color: Colors.white, fontFamily: kMono, fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 1.5)),
@@ -733,7 +762,7 @@ class _Lcd extends StatelessWidget {
   static String _codecLabel(Map<String, dynamic>? stats, AppController app) {
     final c = stats?['codec']?.toString() ?? '';
     if (c.isEmpty) return app.audio.preferredCodecLabel.replaceAll(' HD', '');
-    return switch (c.toUpperCase()) { 'G722' => 'G.722', 'PCMA' => 'G.711a', 'PCMU' => 'G.711u', 'OPUS' => 'Opus', _ => c };
+    return switch (c.toUpperCase()) { 'G722' => 'G.722', 'PCMA' => 'G.711a', 'PCMU' => 'G.711u', 'OPUS' => tr('Opus'), _ => c };
   }
 
   List<Widget> _controls(BuildContext context, AppController app, CallSession c) {
@@ -746,7 +775,7 @@ class _Lcd extends StatelessWidget {
     Widget grid(List<Widget> children) => Container(
           margin: const EdgeInsets.only(top: 12),
           padding: const EdgeInsets.only(top: 12),
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
+          decoration: BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
           child: LayoutBuilder(builder: (context, cons) {
             final w = (cons.maxWidth - 16) / 3;
             return Wrap(spacing: 8, runSpacing: 8, children: [
@@ -758,15 +787,15 @@ class _Lcd extends StatelessWidget {
     if (s == CallState.incoming) {
       return [
         grid([
-          _Span(2, NxButton(label: 'Contestar llamada', tone: NxTone.emerald, height: 38, onTap: () => m.answer(c))),
-          NxButton(label: 'Rechazar', tone: NxTone.red, height: 38, onTap: () => m.reject(c)),
+          _Span(2, NxButton(label: tr('Contestar llamada'), tone: NxTone.emerald, height: 38, onTap: () => m.answer(c))),
+          NxButton(label: tr('Rechazar'), tone: NxTone.red, height: 38, onTap: () => m.reject(c)),
         ])
       ];
     }
     if (s == CallState.outgoing || s == CallState.ringing || s == CallState.connecting || s == CallState.transferring) {
       return [
         grid([
-          _Span(3, NxButton(label: s == CallState.transferring ? 'Colgar' : 'Cancelar llamada', tone: NxTone.red, height: 38, onTap: () => m.hangup(c))),
+          _Span(3, NxButton(label: s == CallState.transferring ? tr('Colgar') : tr('Cancelar llamada'), tone: NxTone.red, height: 38, onTap: () => m.hangup(c))),
         ])
       ];
     }
@@ -776,38 +805,38 @@ class _Lcd extends StatelessWidget {
     return [
       grid([
         held
-            ? NxButton(label: 'Recuperar', tone: NxTone.amber, height: 38, onTap: () => m.unhold(c))
-            : NxButton(label: 'Retener', height: 38, onTap: can(CallAction.hold) ? () => m.hold(c) : null),
-        NxButton(label: 'Transferir', height: 38, onTap: can(CallAction.transfer) && c.consultFor == null ? () => onTransfer(!transferOpen) : null),
+            ? NxButton(label: tr('Recuperar'), tone: NxTone.amber, height: 38, onTap: () => m.unhold(c))
+            : NxButton(label: tr('Retener'), height: 38, onTap: can(CallAction.hold) ? () => m.hold(c) : null),
+        NxButton(label: tr('Transferir'), height: 38, onTap: can(CallAction.transfer) && c.consultFor == null ? () => onTransfer(!transferOpen) : null),
         NxButton(
-          label: m.muted ? 'Silenciado' : 'Silenciar',
+          label: m.muted ? tr('Silenciado') : tr('Silenciar'),
           height: 38,
           tone: m.muted ? NxTone.gold : NxTone.surface,
           onTap: () => m.setMute(!m.muted),
         ),
         hasOther
-            ? NxButton(label: 'Alternar', height: 38, tone: NxTone.gold, bold: true, onTap: m.swap)
+            ? NxButton(label: tr('Alternar'), height: 38, tone: NxTone.gold, bold: true, onTap: m.swap)
             : NxButton(label: 'DTMF', height: 38, tone: dtmfMode ? NxTone.dark : NxTone.surface, onTap: can(CallAction.dtmf) ? onToggleDtmf : null),
         hasOther
             ? NxButton(
-                label: m.conference ? 'Dividir conf.' : 'Conferencia',
+                label: m.conference ? tr('Dividir conf.') : tr('Conferencia'),
                 height: 38,
                 tone: m.conference ? NxTone.dark : NxTone.surface,
                 onTap: () {
                   m.toggleConference();
-                  app.showToast(m.conference ? 'Conferencia dividida · la otra llamada vuelve a espera' : 'Conferencia a 3 vías activa (mezcla local PJSIP)');
+                  app.showToast(m.conference ? tr('Conferencia dividida · la otra llamada vuelve a espera') : tr('Conferencia a 3 vías activa (mezcla local PJSIP)'));
                 },
               )
             : NxButton(
-                label: 'Aparcar 71',
+                label: tr('Aparcar 71'),
                 height: 38,
                 onTap: can(CallAction.transfer)
                     ? () {
-                        if (m.park(c)) app.showToast('Aparcando ${c.displayName} en la órbita de FreePBX (70 → 71…)');
+                        if (m.park(c)) app.showToast(tr('Aparcando {0} en la órbita de FreePBX (70 → 71…)', [c.displayName]));
                       }
                     : null,
               ),
-        NxButton(label: 'Colgar L${line?.number ?? ''}', tone: NxTone.red, height: 38, onTap: () => m.hangup(c)),
+        NxButton(label: tr('Colgar L{0}', [line?.number ?? '']), tone: NxTone.red, height: 38, onTap: () => m.hangup(c)),
       ])
     ];
   }
@@ -821,6 +850,22 @@ class _Span extends StatelessWidget {
   Widget build(BuildContext context) => child;
 }
 
+/// Aviso de mala conexión: devuelve el motivo o null si la red va bien.
+/// Umbrales: pérdida > 3 %, jitter > 50 ms, RTT > 350 ms o MOS < 3,5.
+String? _poorNet(Map<String, dynamic>? stats) {
+  if (stats == null) return null;
+  double v(String k) => ((stats[k] as num?) ?? 0) / 10.0;
+  final loss = v('loss_x10'), jitter = v('jitter_x10'), mos = v('mos_x10');
+  final rtt = (stats['rtt_ms'] as num?)?.toDouble() ?? 0;
+  final why = <String>[
+    if (loss > 3) tr('pérdida de paquetes {0} %', [loss.toStringAsFixed(1)]),
+    if (jitter > 50) tr('jitter {0} ms', [jitter.toStringAsFixed(0)]),
+    if (rtt > 350) tr('retardo {0} ms', [rtt.toStringAsFixed(0)]),
+    if (mos > 0 && mos < 3.5) 'MOS ${mos.toStringAsFixed(1)}',
+  ];
+  return why.isEmpty ? null : tr('La red está fallando: {0}. El cliente puede oírte cortado.', [why.join(' · ')]);
+}
+
 class _StatsBox extends StatelessWidget {
   const _StatsBox({required this.stats});
   final Map<String, dynamic>? stats;
@@ -832,32 +877,32 @@ class _StatsBox extends StatelessWidget {
     final loss = v('loss_x10');
     final mosColor = mos >= 4.0 ? NxColors.greenText : (mos >= 3.4 ? NxColors.amberText : NxColors.redText);
     final mosBg = mos >= 4.0 ? NxColors.greenSoft : (mos >= 3.4 ? NxColors.amberSoft : NxColors.redSoft);
-    Widget box(String label, String value, [Color color = NxColors.text]) => Expanded(
+    Widget box(String label, String value, [Color? color]) => Expanded(
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 4),
             decoration: BoxDecoration(color: NxColors.surface, borderRadius: BorderRadius.circular(8)),
             child: Column(children: [
-              Text(label, style: const TextStyle(fontSize: 9, color: NxColors.gray400)),
-              Text(value, style: TextStyle(fontFamily: kMono, fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+              Text(label, style: TextStyle(fontSize: 9, color: NxColors.gray400)),
+              Text(value, style: TextStyle(fontFamily: kMono, fontSize: 11, fontWeight: FontWeight.w700, color: color ?? NxColors.text)),
             ]),
           ),
         );
     return Container(
       margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: NxColors.goldBorder)),
+      decoration: BoxDecoration(color: NxColors.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: NxColors.goldBorder)),
       child: Column(children: [
         Row(children: [
-          const Expanded(child: Text('Telemetría media RTP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
-          Pill(stats == null ? 'MOS —' : 'MOS ${mos.toStringAsFixed(1)} / 5.0', mono: true, fg: mosColor, bg: mosBg),
+          Expanded(child: Text(tr('Telemetría media RTP'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700))),
+          Pill(stats == null ? tr('MOS —') : tr('MOS {0} / 5.0', [mos.toStringAsFixed(1)]), mono: true, fg: mosColor, bg: mosBg),
         ]),
-        const Divider(height: 12, color: NxColors.surfaceHover),
+        Divider(height: 12, color: NxColors.surfaceHover),
         Row(children: [
           box('JITTER', '${v('jitter_x10').toStringAsFixed(1)} ms'),
           const SizedBox(width: 8),
-          box('PACKET LOSS', '${loss.toStringAsFixed(1)}%', loss < 1 ? NxColors.greenText : NxColors.redText),
+          box(tr('PACKET LOSS'), '${loss.toStringAsFixed(1)}%', loss < 1 ? NxColors.greenText : NxColors.redText),
           const SizedBox(width: 8),
-          box('LATENCIA RTT', '${(stats?['rtt_ms'] as num?)?.toInt() ?? 0} ms'),
+          box(tr('LATENCIA RTT'), '${(stats?['rtt_ms'] as num?)?.toInt() ?? 0} ms'),
         ]),
       ]),
     );
@@ -890,11 +935,11 @@ class _TransferPanelState extends State<_TransferPanel> {
     return Container(
       margin: const EdgeInsets.only(top: 12),
       padding: const EdgeInsets.only(top: 12),
-      decoration: const BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: NxColors.border))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          const Expanded(child: Text('Transferencia SIP (REFER)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-          if (!consulting) Tactile(onTap: widget.onClose, child: const Text('Cancelar', style: TextStyle(fontSize: 11, color: NxColors.gray400))),
+          Expanded(child: Text(tr('Transferencia SIP (REFER)'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+          if (!consulting) Tactile(onTap: widget.onClose, child: Text(tr('Cancelar'), style: TextStyle(fontSize: 11, color: NxColors.gray400))),
         ]),
         const SizedBox(height: 8),
         if (!consulting) ...[
@@ -903,22 +948,22 @@ class _TransferPanelState extends State<_TransferPanel> {
             autofocus: true,
             style: const TextStyle(fontFamily: kMono, fontSize: 12),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9*#+]'))],
-            decoration: const InputDecoration(hintText: 'Extensión o número destino (ej. 205)'),
+            decoration: InputDecoration(hintText: tr('Extensión o número destino (ej. 205)')),
           ),
           const SizedBox(height: 8),
           Row(children: [
             Expanded(
               child: NxButton(
-                label: 'Transferencia ciega',
+                label: tr('Transferencia ciega'),
                 tone: NxTone.white,
                 height: 34,
                 radius: 12,
                 onTap: () {
                   if (app.transfers.blind(c, _ctl.text)) {
-                    app.showToast('REFER enviado: transferencia ciega a ${_ctl.text}');
+                    app.showToast(tr('REFER enviado: transferencia ciega a {0}', [_ctl.text]));
                     widget.onClose();
                   } else {
-                    app.showToast('Indica el destino de la transferencia');
+                    app.showToast(tr('Indica el destino de la transferencia'));
                   }
                 },
               ),
@@ -926,16 +971,16 @@ class _TransferPanelState extends State<_TransferPanel> {
             const SizedBox(width: 8),
             Expanded(
               child: NxButton(
-                label: 'Atendida (consultar)',
+                label: tr('Atendida (consultar)'),
                 tone: NxTone.dark,
                 height: 34,
                 radius: 12,
                 onTap: () {
                   final cs = app.transfers.startAttended(c, _ctl.text);
                   if (cs == null) {
-                    app.showToast('Indica el destino para consultar');
+                    app.showToast(tr('Indica el destino para consultar'));
                   } else {
-                    app.showToast('Llamada original en espera · consultando con ${_ctl.text}…');
+                    app.showToast(tr('Llamada original en espera · consultando con {0}…', [_ctl.text]));
                     widget.onClose();
                   }
                 },
@@ -953,22 +998,22 @@ class _TransferPanelState extends State<_TransferPanel> {
                   TextSpan(text: c.remoteNumber, style: const TextStyle(fontFamily: kMono, fontWeight: FontWeight.w700)),
                   const TextSpan(text: '.'),
                 ]),
-                style: const TextStyle(fontSize: 11, color: NxColors.goldDark, fontWeight: FontWeight.w500),
+                style: TextStyle(fontSize: 11, color: NxColors.goldDark, fontWeight: FontWeight.w500),
               ),
               const SizedBox(height: 8),
               Row(children: [
                 Expanded(
                   child: NxButton(
-                    label: 'Completar transferencia',
+                    label: tr('Completar transferencia'),
                     tone: NxTone.emerald,
                     height: 30,
                     radius: 8,
                     fontSize: 11,
                     onTap: () {
                       if (app.transfers.complete(c)) {
-                        app.showToast('REFER con Replaces enviado hacia ${c.remoteNumber}');
+                        app.showToast(tr('REFER con Replaces enviado hacia {0}', [c.remoteNumber]));
                       } else {
-                        app.showToast('No se pudo completar la transferencia');
+                        app.showToast(tr('No se pudo completar la transferencia'));
                       }
                     },
                   ),
@@ -976,14 +1021,14 @@ class _TransferPanelState extends State<_TransferPanel> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: NxButton(
-                    label: 'Cancelar y recuperar',
+                    label: tr('Cancelar y recuperar'),
                     tone: NxTone.white,
                     height: 30,
                     radius: 8,
                     fontSize: 11,
                     onTap: () {
                       app.transfers.cancel(c);
-                      app.showToast('Consulta cancelada · llamada original recuperada');
+                      app.showToast(tr('Consulta cancelada · llamada original recuperada'));
                     },
                   ),
                 ),
@@ -1009,10 +1054,16 @@ class _DialInput extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: focus,
-      builder: (context, _) => AnimatedContainer(
+      listenable: Listenable.merge([focus, controller]),
+      builder: (context, _) {
+        // Debajo del número: contacto de la agenda u origen (provincia, móvil, país)
+        final t = controller.text.trim();
+        final who = t.length < 3 ? '' : AppController.I.nameFor(t);
+        final origin = t.length < 3 || who.isNotEmpty ? null : PhoneNumbers.lookup(t);
+        final hint = who.isNotEmpty ? who : (origin == null ? '' : origin.display);
+        return AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+        padding: const EdgeInsets.fromLTRB(16, 6, 6, 6),
         decoration: BoxDecoration(
           color: NxColors.surface,
           borderRadius: BorderRadius.circular(16),
@@ -1021,33 +1072,47 @@ class _DialInput extends StatelessWidget {
         ),
         child: Row(children: [
           Expanded(
-            child: TextField(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+             TextField(
               controller: controller,
               focusNode: focus,
               enabled: !dtmf,
               onSubmitted: (_) => onSubmit(),
-              style: const TextStyle(fontFamily: kMono, fontSize: 18, fontWeight: FontWeight.w600, letterSpacing: -0.3),
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 1.2, height: 1.1, color: NxColors.text),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9*#+]'))],
               decoration: InputDecoration(
-                hintText: dtmf ? 'Modo DTMF: pulsa el teclado' : 'Introduce número o extensión...',
-                hintStyle: const TextStyle(fontFamily: kMono, fontSize: 16, fontWeight: FontWeight.w600, color: NxColors.gray400, letterSpacing: -0.3),
+                hintText: dtmf ? tr('Modo DTMF: pulsa el teclado') : tr('Introduce número o extensión...'),
+                hintStyle: TextStyle(fontSize: 15, fontWeight: FontWeight.w400, color: NxColors.gray400, letterSpacing: 0.1),
                 filled: false,
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
                 disabledBorder: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
                 isDense: true,
               ),
-            ),
+             ),
+             AnimatedSize(
+               duration: const Duration(milliseconds: 160),
+               alignment: Alignment.topLeft,
+               child: hint.isEmpty
+                   ? const SizedBox(width: double.infinity)
+                   : Padding(
+                       padding: const EdgeInsets.only(bottom: 2),
+                       child: Text(hint, maxLines: 1, overflow: TextOverflow.ellipsis,
+                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: NxColors.goldDark, letterSpacing: 0.2)),
+                     ),
+             ),
+            ]),
           ),
           Tactile(
             onTap: onBackspace,
-            tooltip: 'Borrar dígito',
-            child: const Padding(padding: EdgeInsets.all(6), child: Icon(Icons.backspace_outlined, size: 20, color: NxColors.gray400)),
+            tooltip: tr('Borrar dígito'),
+            child: Padding(padding: EdgeInsets.all(6), child: Icon(Icons.backspace_outlined, size: 20, color: NxColors.gray400)),
           ),
         ]),
-      ),
+        );
+      },
     );
   }
 }
@@ -1067,7 +1132,7 @@ class _OutPill extends StatelessWidget {
             borderRadius: BorderRadius.circular(99),
             border: Border.all(color: selected ? NxColors.gold : NxColors.border),
           ),
-          child: Text('Línea ${line.number} • Ext. ${line.extension}',
+          child: Text(tr('Línea {0} • Ext. {1}', [line.number, line.extension]),
               style: TextStyle(
                   fontSize: 11, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? NxColors.goldDark : NxColors.gray500)),
         ),
@@ -1094,33 +1159,131 @@ class _Keypad extends StatelessWidget {
         for (final k in keys)
           SizedBox(
             width: w,
-            height: 44,
-            child: Tactile(
+            height: 46,
+            child: _KeypadKey(
+              digit: k.$1,
+              letters: k.$2,
               onTap: () => onKey(k.$1),
               onLongPress: k.$1 == '0' ? () => onKey('+') : (k.$1 == '1' ? onVoicemail : null),
-              tooltip: k.$1 == '1' ? 'Mantén pulsado para el buzón (*97)' : null,
-              child: Builder(builder: (context) {
-                return Container(
-                  decoration: BoxDecoration(
-                    color: NxColors.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: NxColors.border.withValues(alpha: 0.8)),
-                    boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2)),
-                    ],
-                  ),
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Text(k.$1, style: const TextStyle(fontFamily: kMono, fontSize: 16, fontWeight: FontWeight.w700, height: 1)),
-                    if (k.$2.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(k.$2, style: TextStyle(fontSize: k.$2 == '+' ? 9 : 8, color: NxColors.gray400, letterSpacing: 1.6, height: 1)),
-                    ],
-                  ]),
-                );
-              }),
+              tooltip: k.$1 == '1' ? tr('Mantén pulsado para el buzón (*97)') : null,
             ),
           ),
       ]);
     });
   }
+}
+
+/// Tecla del teclado: relieve sutil, cifra en trazo fino y respuesta suave al pulsar y al pasar el ratón.
+class _KeypadKey extends StatefulWidget {
+  const _KeypadKey({required this.digit, required this.letters, required this.onTap, this.onLongPress, this.tooltip});
+  final String digit, letters;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final String? tooltip;
+  @override
+  State<_KeypadKey> createState() => _KeypadKeyState();
+}
+
+class _KeypadKeyState extends State<_KeypadKey> {
+  bool _down = false, _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final key = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _down = true),
+        onTapUp: (_) => setState(() => _down = false),
+        onTapCancel: () => setState(() => _down = false),
+        onTap: widget.onTap,
+        onLongPress: widget.onLongPress,
+        child: AnimatedScale(
+          scale: _down ? 0.965 : 1,
+          duration: const Duration(milliseconds: 90),
+          curve: Curves.easeOut,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: _down ? [NxColors.surfaceHover, NxColors.surfaceHover] : [NxColors.card, NxColors.surface],
+              ),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: _hover && !_down ? NxColors.goldBorder : NxColors.border),
+              boxShadow: _down
+                  ? null
+                  : [BoxShadow(color: Colors.black.withValues(alpha: NxColors.night ? 0.25 : 0.045), blurRadius: 6, offset: const Offset(0, 2))],
+            ),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Text(widget.digit,
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w400, height: 1, color: NxColors.text, letterSpacing: -0.2)),
+              if (widget.letters.isNotEmpty) ...[
+                const SizedBox(height: 3),
+                Text(widget.letters,
+                    style: TextStyle(fontSize: widget.letters == '+' ? 10 : 7.5, fontWeight: FontWeight.w600, color: NxColors.gray400, letterSpacing: 1.8, height: 1)),
+              ],
+            ]),
+          ),
+        ),
+      ),
+    );
+    return widget.tooltip == null ? key : Tooltip(message: widget.tooltip!, waitDuration: const Duration(milliseconds: 600), child: key);
+  }
+}
+
+/// Botón principal de llamada: color de la marca, sombra suave, ligera elevación al pasar el ratón.
+class _CallButton extends StatefulWidget {
+  const _CallButton({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+  @override
+  State<_CallButton> createState() => _CallButtonState();
+}
+
+class _CallButtonState extends State<_CallButton> {
+  bool _hover = false, _down = false;
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _down = true),
+          onTapUp: (_) => setState(() => _down = false),
+          onTapCancel: () => setState(() => _down = false),
+          onTap: widget.onTap,
+          child: AnimatedScale(
+            scale: _down ? 0.98 : 1,
+            duration: const Duration(milliseconds: 90),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              height: 46,
+              transform: Matrix4.translationValues(0, _hover && !_down ? -1 : 0, 0),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color.lerp(NxColors.gold, Colors.white, _hover ? 0.06 : 0)!, Color.lerp(NxColors.gold, NxColors.goldDark, 0.35)!],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(color: NxColors.gold.withValues(alpha: _hover ? 0.32 : 0.22), blurRadius: _hover ? 14 : 10, offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.call_rounded, size: 17, color: Colors.white),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(widget.label,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: 0.1)),
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
 }

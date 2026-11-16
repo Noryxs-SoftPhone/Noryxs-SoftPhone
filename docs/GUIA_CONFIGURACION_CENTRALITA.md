@@ -311,6 +311,11 @@ Permite que, mientras el usuario habla, las nuevas llamadas **esperen en una col
 - **Llamadas externas:** Connectivity → **Inbound Routes** → destino *Queues → 400*.
 - **Llamadas internas de prueba:** marcar `400` desde otra extensión.
 
+### Varias colas y varias extensiones
+Se pueden crear tantas colas como se necesiten (p. ej. `400` Recepción, `401` Reservas). En cada una, añade como **Static Agents** las extensiones que la atienden (`201,0`, `202,0`…), con las mismas opciones de arriba.
+
+En la app, cada línea indica qué colas atiende (*Ajustes › Líneas SIP › Colas que atiende*); el mismo usuario AMI sirve para todas las colas y para todos los puestos. No hay que crear un usuario AMI por extensión.
+
 **Comprobación (con la 200 en una llamada y otra extensión llamando al 400):**
 ```bash
 asterisk -rx "queue show 400"
@@ -340,7 +345,7 @@ secret = CONTRASEÑA_LARGA_ALEATORIA
 deny   = 0.0.0.0/0.0.0.0
 permit = 127.0.0.1/255.255.255.255
 permit = 192.168.1.0/255.255.255.0      ; ← redes de los puestos NORYXS
-permit = 10.8.0.0/255.255.255.0
+permit = 192.168.1.0/255.255.255.0
 read   = call,agent
 write  = call
 writetimeout = 5000
@@ -446,7 +451,8 @@ Entrega por un canal seguro (nunca por email en claro):
 | Extensiones para teclas BLF | `200 Recepción`, `205 Soporte` | SIP → Teclas rápidas |
 | Órbita de aparcamiento | `70` / `71–78` | SIP → Teclas rápidas (órbita) |
 | PIN del buzón | `1234` | Lo pide el propio buzón al marcar `*97` |
-| **Panel de cola (opcional):** servidor AMI, puerto, usuario y contraseña, número de cola | `192.168.1.10`, `5038`, `noryxs`, `400` | SIP → Panel de cola |
+| **Panel de cola (opcional):** servidor AMI, puerto, usuario y contraseña | `192.168.1.10`, `5038`, `noryxs` | Ajustes › Cola de llamadas |
+| **Colas que atiende cada línea** | Línea 1 → `400`, Línea 2 → `401` | Ajustes › Líneas SIP › Colas que atiende |
 
 ---
 
@@ -484,7 +490,7 @@ Marca cada punto con llamadas reales:
 | **401/403** "Error de autenticación" | Secreto o usuario incorrectos | Revisar el secreto de la extensión; comprobar si fail2ban ha bloqueado la IP |
 | "Connection refused" en todo | fail2ban ha bloqueado la IP | `fail2ban-client unban <IP>` (sección 15) |
 | Audio en un solo sentido o sin audio | NAT/RTP | `direct_media=no`, `rtp_symmetric/force_rport/rewrite_contact=yes`, External Address y Local Networks, puertos 10000–20000 UDP |
-| La llamada conecta pero **no se oye nada** y se corta a los ~30 s | La red del puesto no está en *Local Networks*: Asterisk anuncia su IP **pública** (External Address) en el SDP y en el Contact; el audio y el ACK salen hacia Internet y no vuelven. Caso real: centralita de un cliente 192.168.10.5, puesto en 172.16.0.0/24, SDP con `c=IN IP4 203.0.113.10` | *Settings › Asterisk SIP Settings › Local Networks*: añadir la red del puesto (p. ej. `172.16.0.0/24` o `172.16.0.0/12`) → Submit → Apply Config |
+| La llamada conecta pero **no se oye nada** y se corta a los ~30 s | La red del puesto no está en *Local Networks*: Asterisk anuncia su IP **pública** (External Address) en el SDP y en el Contact; el audio y el ACK salen hacia Internet y no vuelven. Caso real: centralita del hotel 192.168.4.210, puesto en 172.16.4.0/24, SDP con `c=IN IP4 212.145.131.19` | *Settings › Asterisk SIP Settings › Local Networks*: añadir la red del puesto (p. ej. `172.16.4.0/24` o `172.16.0.0/12`) → Submit → Apply Config |
 | La segunda llamada da ocupado | Call Waiting desactivado | Sección 5 |
 | La cola suena encima de la llamada en curso | Falta *Skip Busy Agents = Yes + (ringinuse=no)* | Sección 11 |
 | Tecla BLF gris ("Sin estado") | Suscripciones desactivadas o la extensión no existe | *Allow Subscriptions = Yes*; `core show hints` |
@@ -513,7 +519,7 @@ Configuración validada en la centralita de pruebas de NORYXS:
 
 | Elemento | Valor |
 |---|---|
-| Plataforma | FreePBX 17.0.33 · Asterisk 22.11 · Debian 12 |
+| Plataforma | FreePBX 17.0.33 · Asterisk 22.11 · Debian 12 (LXC en Proxmox) |
 | Extensiones | 200 *Linea Principal*, 201 *Atencion Directa*, 202 *Soporte* — PJSIP, buzón, Call Waiting, Max Contacts 3, Allow Subscriptions |
 | Códecs | g722, ulaw, alaw, opus |
 | Aparcamiento | 70 / órbitas 71–78 / 45 s / vuelve al origen |

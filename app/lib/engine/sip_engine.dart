@@ -201,6 +201,7 @@ class SipEngine {
   // ---- Funciones avanzadas ----
 
   int setDnd(bool on) => _n.setDnd(on ? 1 : 0);
+  int setDndAcc(int accId, bool on) => accId < 0 ? -10 : _n.setDndAcc(accId, on ? 1 : 0);
 
   int blfAdd(int accId, String target) {
     final t = _n.cstr(target);
@@ -223,6 +224,18 @@ class SipEngine {
 
   int recStop() => _n.recStop();
 
+  /// Reproduce un WAV por el altavoz. Devuelve la duración en ms (o < 0 si falla).
+  int playStart(String path) {
+    final p = _n.cstr(path);
+    final r = _n.playStart(p);
+    _n.free(p);
+    return r;
+  }
+
+  int playStop() => _n.playStop();
+  int playPos() => _n.playPos();
+  int playSeek(int ms) => _n.playSeek(ms);
+
   Map<String, dynamic>? callStats(int callId) {
     final s = _n.takeString(_n.callStats(callId));
     return s == null ? null : jsonDecode(s) as Map<String, dynamic>;
@@ -231,6 +244,8 @@ class SipEngine {
   // ---- Cifrado de notas (AES-256 + HMAC, clave en el Llavero) ----
 
   String? seal(String plain) => _n.seal(plain);
+  String? pinSeal(String plain, String pin) => _n.pinSeal(plain, pin);
+  String? pinUnseal(String sealed, String pin) => _n.pinUnseal(sealed, pin);
   String? unseal(String sealed) => _n.unseal(sealed);
 
   // ---- Almacenamiento seguro ----

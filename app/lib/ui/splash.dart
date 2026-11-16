@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../core/i18n.dart';
 
 import 'package:flutter/material.dart';
 
@@ -18,8 +19,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..forward();
-  String _status = 'Iniciando motor PJSIP…';
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 5500))..forward();
+  String _status = tr('Iniciando motor PJSIP…');
 
   @override
   void initState() {
@@ -28,7 +29,8 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   }
 
   Future<void> _boot() async {
-    final minTime = Future.delayed(const Duration(milliseconds: 2300));
+    // El splash dura unos 5,5 s (la barra avanza durante todo ese tiempo)
+    final minTime = Future.delayed(const Duration(milliseconds: 5500));
     try {
       await AppController.I.init().timeout(const Duration(seconds: 12));
     } catch (e) {
@@ -36,10 +38,10 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       try {
         AppController.I.step('ERROR init: $e');
       } catch (_) {}
-      if (mounted) setState(() => _status = 'Error al iniciar: $e');
+      if (mounted) setState(() => _status = tr('Error al iniciar: {0}', [e]));
       return;
     }
-    if (mounted) setState(() => _status = 'Registrando líneas SIP…');
+    if (mounted) setState(() => _status = tr('Registrando líneas SIP…'));
     await minTime;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(PageRouteBuilder(
@@ -60,11 +62,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final logoIn = _interval(0.0, 0.45, Curves.easeOutBack);
-    final glow = _interval(0.25, 0.75);
-    final titleIn = _interval(0.30, 0.65);
-    final subIn = _interval(0.45, 0.80);
-    final bar = _interval(0.40, 1.0, Curves.easeInOutCubic);
+    final logoIn = _interval(0.0, 0.2, Curves.easeOutBack);
+    final glow = _interval(0.1, 0.4);
+    final titleIn = _interval(0.14, 0.32);
+    final subIn = _interval(0.22, 0.42);
+    final bar = _interval(0.18, 1.0, Curves.easeInOutCubic);
 
     return Scaffold(
       backgroundColor: const Color(0xFF121316),
@@ -136,7 +138,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
               bottom: 26,
               child: Opacity(
                 opacity: subIn.value * 0.7,
-                child: Text('PJSIP · SIP TLS · SRTP · HD VOICE  ·  $kBuildLabel',
+                child: Text(tr('PJSIP · SIP TLS · SRTP · HD VOICE  ·  {0}', [kBuildLabel]),
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Color(0xFF54565D), fontSize: 9.5, letterSpacing: 2.2)),
               ),

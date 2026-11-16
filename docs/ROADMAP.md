@@ -92,8 +92,10 @@ Especificación: [ESPECIFICACION.md › Anexo 2](ESPECIFICACION.md).
 - ✅ Identificación offline del llamante — pruebas unitarias y validado con llamada real ("Extensión interna"). 🟡 Ver "última nota" con un número externo real.
 - ✅ Botón en la cabecera para mostrar/ocultar el panel de cola.
 
-## Fase 6 — Windows y Linux ⏳
-- PJSIP con MSVC / gcc; `nx_secret_*` con Credential Manager / libsecret; DLL/SO junto al ejecutable; piezas nativas de aviso de llamada.
+## Fase 6 — Windows y Linux ✅ (16/11/2026)
+- ✅ Motor para Windows (MSYS2 UCRT64, OpenSSL 3.6) y Linux; `.deb` para Linux.
+- ✅ Tarjeta flotante (X11) / notificación de escritorio (Wayland), bandeja, panel de cola, inicio de sesión, instancia única.
+- ✅ Linux probado con llamadas reales (Wayland). 🟡 Windows: falta probar llamadas en un PC.
 
 ## Fase 7 — Distribución interna ⏳
 - Subir a GitHub (URL pendiente) y comprobar el CI.
@@ -101,6 +103,36 @@ Especificación: [ESPECIFICACION.md › Anexo 2](ESPECIFICACION.md).
 - Lista de mensajes de voz por IMAP (FreePBX voicemail-to-email).
 
 ---
+
+## Fase 8 — Mejoras (16/11/2026) ⏳
+
+Cada una: CHANGELOG con prueba y manual al día.
+
+| # | Mejora | Diseño acordado | Estado |
+|---|---|---|---|
+| 1 | Atajos de teclado globales y botones de cascos | Combinaciones configurables para contestar / colgar / silenciar desde cualquier app; botón de cascos USB/Bluetooth (reproducir/pausa) contesta o cuelga | 🟡 hecho, falta probar con cascos reales |
+| 2 | Escuchar grabaciones desde el historial | ▶ en la llamada grabada; reproductor integrado (motor PJSIP); abrir carpeta | 🟡 hecho, falta probar con una grabación real |
+| 3 | Buzón de voz dentro de la app | Lista de mensajes (remitente, fecha, duración), escuchar, borrar y devolver la llamada. **Leído directamente de la centralita** con un acceso de solo lectura en FreePBX (documentado en la guía), autenticado con la extensión y su PIN de buzón | ⏳ pendiente (necesita acceso a la centralita de pruebas) |
+| 4 | Desvío y No molestar por línea | El estado de desvío/DND pertenece a cada línea; la cabecera muestra el de la línea seleccionada (antes era global) | 🟡 hecho, falta probar con llamadas |
+| 5 | Configuración automática de puestos | Exportar desde un puesto e importar en otros por **fichero, enlace o QR**: líneas, BLF, cola, etiquetas. **Incluye contraseñas, cifradas con PIN**. No toca la centralita | 🟡 hecho, falta probar una importación real entre dos puestos |
+| 6 | Aviso de actualización | **Sin servidor:** la app consulta un `latest.json` en una **carpeta compartida** del hotel (NAS / recurso de red, ruta configurable) y avisa con el instalador. Script `packaging/publicar_en_carpeta.sh` | 🟡 hecho, falta ver el aviso en un puesto real |
+| 7 | Clic para llamar | La app se registra para enlaces `tel:` y `sip:` en macOS, Windows y Linux | 🟡 hecho (pruebas unitarias), falta probar en cada sistema |
+| 8 | ~~Habitaciones~~ | Eliminado (16/11): FreePBX ya envía el nombre de la extensión; el del huésped necesitaría el PMS | ❌ descartado |
+| 9 | Buscador en historial y agenda | Filtro instantáneo por nombre, número, nota o habitación | ✅ (pruebas unitarias) |
+| 10 | Modo oscuro | Claro / oscuro / automático (según el sistema) | ✅ |
+| 11 | Inglés | Español e inglés; idioma del sistema o elegido en ajustes | ✅ (falta traducir las piezas nativas) |
+| 12 | Timbre distinto por línea | Cada línea elige su timbre | 🟡 hecho, falta probar con llamadas |
+| 13 | Diagnóstico de red y audio | Botón que prueba conexión con la centralita, registro, micrófono/altavoz (eco) y muestra el resultado | ✅ |
+| 15 | Catalán | Idioma automático según el sistema (ca/es/en; cualquier otro → inglés) o elegido en ajustes | ✅ |
+| 16 | Reducción de ruido y volumen automático | Speex AEC por software con denoise y AGC, siempre activo en escritorio | 🟡 hecho, falta oírlo en una llamada real |
+| 17 | Aviso de mala conexión | "Conexión inestable" si pérdida > 3 %, jitter > 50 ms, RTT > 350 ms o MOS < 3,5 | 🟡 hecho, falta verlo con red mala real |
+| 18 | Perdidas pendientes de devolver | Contador, filtro, etiqueta "Pendiente", "Marcar atendida" | ✅ |
+| 19 | Transcripción local de grabaciones | whisper.cpp 1.9.5 (MIT) + modelo Base q5_1 (57 MB) dentro de la app; automática al colgar, en segundo plano, cifrada, buscable desde el historial. macOS/Windows/Linux (no iOS) | 🟡 probada en macOS (WAV real de la app); Windows/Linux pendiente de la CI |
+| 20 | Colas por línea | Cada línea indica las colas que atiende; el panel agrupa por cola y Atender/Al buzón usan la extensión de esa línea (si no tiene, la seleccionada). Una sola conexión AMI por puesto | 🟡 hecho (pruebas unitarias + interfaz), falta probar con la cola real |
+| 21 | Acerca de | Ajustes › Acerca de: versión, compilación (commit y fecha), sistema, componentes, autor (Yandry Hernández Acosta, LinkedIn y GitHub), privacidad y licencias; *Copiar información* para soporte | ✅ |
+| 14 | WhatsApp | **Sin servidor:** botón WhatsApp en llamada e historial con plantillas (ES/EN); abre WhatsApp Desktop/Web con el chat y el mensaje escrito (enlace oficial `wa.me`), se pulsa Enviar. Sin riesgo de bloqueo. (Descartado WAHA: requería servidor) | ✅ (pruebas unitarias) |
+
+Decisión (16/11/2026): **nada puede depender de un servidor** → actualizaciones por carpeta compartida y WhatsApp por enlace oficial.
 
 ## Las 15 pruebas obligatorias
 
@@ -129,3 +161,6 @@ Especificación: [ESPECIFICACION.md › Anexo 2](ESPECIFICACION.md).
 - Solo arm64 en macOS.
 - iPhone: sin TLS ni Opus; sin llamadas con la app cerrada; caduca cada 7 días con la cuenta gratuita.
 - No usar `pjsua_buddy_get_dlg_event_info()` (cierre en PJSIP 2.17; ver CHANGELOG).
+
+### Organización de la interfaz (16/11/2026)
+- Ajustes en una pestaña propia por secciones; pantalla principal compacta (BLF en tira, franja de estado); teclado del ordenador directo al marcador; splash 5,5 s.

@@ -1,6 +1,8 @@
+import Carbon.HIToolbox
 import Cocoa
 import CoreText
 import FlutterMacOS
+import MediaPlayer
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -178,6 +180,24 @@ final class CallCardPanel: NSPanel {
   override var canBecomeKey: Bool { true }
 }
 
+// MARK: - Clic para llamar (tel: / sip:)
+
+/// Guarda los enlaces que llegan antes de que Dart esté listo y los entrega después.
+final class NxUrlInbox {
+  static let shared = NxUrlInbox()
+  private var pending: [String] = []
+  var deliver: ((String) -> Void)?
+
+  func receive(_ url: String) {
+    if let d = deliver { d(url) } else { pending.append(url) }
+  }
+
+  func takePending() -> [String] {
+    defer { pending.removeAll() }
+    return pending
+  }
+}
+
 // MARK: - Ventana principal
 
 class MainFlutterWindow: NSWindow, UNUserNotificationCenterDelegate, NSWindowDelegate {
@@ -225,6 +245,44 @@ class MainFlutterWindow: NSWindow, UNUserNotificationCenterDelegate, NSWindowDel
         return
       case "getLaunchAtLogin":
         result(self.launchAtLoginEnabled())
+        return
+      case "pickFile":
+        // Selector de ficheros (CSV de habitaciones, configuración de puestos)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = args["title"] as? String ?? ""
+        panel.beginSheetModal(for: self) { r in result(r == .OK ? panel.url?.path : nil) }
+        return
+      case "saveFile":
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = args["name"] as? String ?? "noryxs"
+        panel.title = args["title"] as? String ?? ""
+        panel.beginSheetModal(for: self) { r in result(r == .OK ? panel.url?.path : nil) }
+        return
+      case "setHotkeys":
+        NxHotkeys.shared.onAction = { [weak self] a in self?.windowChannel?.invokeMethod("hotkey", arguments: ["action": a]) }
+        NxHotkeys.shared.setEnabled(args["enabled"] as? Bool ?? true)
+      case "setMediaSession":
+        NxHotkeys.shared.onAction = { [weak self] a in self?.windowChannel?.invokeMethod("hotkey", arguments: ["action": a]) }
+        NxHotkeys.shared.setMediaSession(active: args["active"] as? Bool ?? false, title: args["title"] as? String ?? "")
+      case "urlHandlerReady":
+        // Dart ya escucha "openUrl": entregar los pendientes y los siguientes al momento
+        NxUrlInbox.shared.deliver = { [weak self] url in
+          self?.windowChannel?.invokeMethod("openUrl", arguments: ["url": url])
+          self?.bringToFront()
+        }
+        let pending = NxUrlInbox.shared.takePending()
+        if !pending.isEmpty { self.bringToFront() }
+        result(pending)
+        return
+      case "setDefaultDialer":
+        self.setDefaultDialer { ok in result(ok) }
+        return
+      case "isDefaultDialer":
+        let app = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "tel:100")!)
+        result(app?.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL)
         return
       case "setSidePanel": self.setSidePanel(open: args["open"] as? Bool ?? false, width: CGFloat(args["width"] as? Double ?? 320))
       default: break
@@ -468,10 +526,93 @@ class MainFlutterWindow: NSWindow, UNUserNotificationCenterDelegate, NSWindowDel
     completionHandler([.banner, .list])
   }
 
+  /// Hace de NORYXS la app para los enlaces tel:, sip: y callto: (macOS pide confirmación).
+  private func setDefaultDialer(_ done: @escaping (Bool) -> Void) {
+    guard #available(macOS 12.0, *) else { done(false); return }
+    let group = DispatchGroup()
+    var ok = true
+    for scheme in ["tel", "sip", "callto"] {
+      group.enter()
+      NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: scheme) { err in
+        if err != nil { ok = false }
+        group.leave()
+      }
+    }
+    group.notify(queue: .main) { done(ok) }
+  }
+
   private func bringToFront() {
     if NSApp.isHidden { NSApp.unhide(nil) }
     if self.isMiniaturized { self.deminiaturize(nil) }
     NSApp.activate(ignoringOtherApps: true)
     self.makeKeyAndOrderFront(nil)
+  }
+}
+
+// MARK: - Atajos globales y botón de los cascos
+
+/// Atajos globales (⌃⌥A contestar, ⌃⌥H colgar, ⌃⌥M silenciar) con RegisterEventHotKey
+/// (no necesita permisos de accesibilidad) y botón de los cascos (reproducir/pausa)
+/// mediante el centro multimedia, activo solo mientras hay una llamada sonando o en curso.
+final class NxHotkeys {
+  static let shared = NxHotkeys()
+  var onAction: ((String) -> Void)?
+  private var refs: [EventHotKeyRef?] = []
+  private var handler: EventHandlerRef?
+  private var mediaActive = false
+
+  private let keys: [(UInt32, String)] = [(UInt32(kVK_ANSI_A), "answer"), (UInt32(kVK_ANSI_H), "hangup"), (UInt32(kVK_ANSI_M), "mute")]
+
+  func setEnabled(_ on: Bool) {
+    unregister()
+    guard on else { return }
+    var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+    InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
+      var id = EventHotKeyID()
+      GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
+                        MemoryLayout<EventHotKeyID>.size, nil, &id)
+      let actions = ["answer", "hangup", "mute"]
+      let i = Int(id.id)
+      if i >= 0 && i < actions.count {
+        DispatchQueue.main.async { NxHotkeys.shared.onAction?(actions[i]) }
+      }
+      return noErr
+    }, 1, &spec, nil, &handler)
+    for (i, k) in keys.enumerated() {
+      var ref: EventHotKeyRef?
+      let hkID = EventHotKeyID(signature: OSType(0x4E585348), id: UInt32(i))  // 'NXSH'
+      RegisterEventHotKey(k.0, UInt32(controlKey | optionKey), hkID, GetApplicationEventTarget(), 0, &ref)
+      refs.append(ref)
+    }
+  }
+
+  private func unregister() {
+    for r in refs { if let r = r { UnregisterEventHotKey(r) } }
+    refs.removeAll()
+    if let h = handler { RemoveEventHandler(h); handler = nil }
+  }
+
+  /// Botón de los cascos: se "apodera" del control multimedia solo durante las llamadas.
+  func setMediaSession(active: Bool, title: String) {
+    let center = MPRemoteCommandCenter.shared()
+    if active {
+      MPNowPlayingInfoCenter.default().nowPlayingInfo = [MPMediaItemPropertyTitle: title, MPMediaItemPropertyArtist: "NORYXS"]
+      MPNowPlayingInfoCenter.default().playbackState = .playing
+      if !mediaActive {
+        for cmd in [center.togglePlayPauseCommand, center.playCommand, center.pauseCommand] {
+          cmd.isEnabled = true
+          cmd.addTarget { [weak self] _ in
+            self?.onAction?("headset")
+            return .success
+          }
+        }
+        mediaActive = true
+      }
+    } else if mediaActive {
+      for cmd in [center.togglePlayPauseCommand, center.playCommand, center.pauseCommand] { cmd.removeTarget(nil) }
+      MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+      MPNowPlayingInfoCenter.default().playbackState = .stopped
+      mediaActive = false
+    }
   }
 }

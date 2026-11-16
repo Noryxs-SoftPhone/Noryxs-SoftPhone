@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import '../core/i18n.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_controller.dart';
@@ -8,6 +11,7 @@ import '../core/feature_managers.dart';
 import '../core/models.dart';
 import '../core/support_managers.dart';
 import '../engine/sip_engine.dart';
+import '../core/updates.dart';
 import 'call_context.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -33,12 +37,13 @@ class _AccountsTabState extends State<AccountsTab> {
   final _domain = TextEditingController();
   final _authUser = TextEditingController();
   final _proxy = TextEditingController();
+  final _lineQueues = TextEditingController();
   SipTransport _transport = SipTransport.udp;
   int _srtp = 0;
+  int _ringTone = -1;
   bool _enabled = true;
   bool _hasPassword = false;
   String? _saveError;
-  late List<MapEntry<String, bool>> _codecs;
 
   SipLine get _line => app.lines.lines[_lineIndex.clamp(0, app.lines.lines.length - 1)];
 
@@ -61,14 +66,15 @@ class _AccountsTabState extends State<AccountsTab> {
     _proxy.text = a.proxy;
     _transport = a.transport;
     _srtp = a.srtp;
+    _ringTone = a.ringTone;
+    _lineQueues.text = a.queues.join(', ');
     _enabled = a.enabled;
     _hasPassword = app.accounts.hasPassword(a);
-    _codecs = List.of(app.audio.codecs);
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _user, _pass, _server, _port, _expires, _domain, _authUser, _proxy]) {
+    for (final c in [_name, _user, _pass, _server, _port, _expires, _domain, _authUser, _proxy, _lineQueues]) {
       c.dispose();
     }
     super.dispose();
@@ -87,15 +93,16 @@ class _AccountsTabState extends State<AccountsTab> {
       ..proxy = _proxy.text.trim()
       ..transport = _transport
       ..srtp = _srtp
+      ..ringTone = _ringTone
+      ..queues = _lineQueues.text.split(RegExp(r'[,;\s]+')).where((e) => e.isNotEmpty).toSet().toList()
       ..enabled = _enabled;
     final pwd = _pass.text;
     _pass.clear();
-    await app.audio.setCodecs(_codecs);
     final ok = await app.saveAccount(_line, password: pwd.isEmpty ? null : pwd);
     if (!mounted) return;
     setState(() {
       _saving = false;
-      _saveError = ok ? null : 'No se pudo guardar la contraseña en el Llavero de macOS';
+      _saveError = ok ? null : tr('No se pudo guardar la contraseña en el Llavero de macOS');
       _hasPassword = app.accounts.hasPassword(a);
     });
   }
@@ -103,7 +110,7 @@ class _AccountsTabState extends State<AccountsTab> {
   Widget _field(String label, TextEditingController c,
       {bool mono = false, bool obscure = false, String? hint, List<TextInputFormatter>? fmt}) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(color: NxColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5)),
+      Text(label, style: TextStyle(color: NxColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5)),
       const SizedBox(height: 4),
       TextField(
         controller: c,
@@ -129,16 +136,16 @@ class _AccountsTabState extends State<AccountsTab> {
 
   Widget _dropdown<T>(String label, T value, List<(T, String)> items, ValueChanged<T> onChanged) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: NxColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5)),
+        Text(label, style: TextStyle(color: NxColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5)),
         const SizedBox(height: 4),
         DropdownButtonFormField<T>(
           initialValue: value,
           isExpanded: true,
           isDense: true,
           iconSize: 18,
-          dropdownColor: Colors.white,
+          dropdownColor: NxColors.card,
           borderRadius: BorderRadius.circular(12),
-          style: const TextStyle(fontSize: 12.5, color: NxColors.text),
+          style: TextStyle(fontSize: 12.5, color: NxColors.text),
           items: [for (final i in items) DropdownMenuItem(value: i.$1, child: Text(i.$2, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)))],
           onChanged: (v) => v == null ? null : onChanged(v),
         ),
@@ -151,24 +158,24 @@ class _AccountsTabState extends State<AccountsTab> {
     final line = _line;
     final reg = line.reg;
     final regText = reg == RegState.registered
-        ? 'Registrada (${line.regCode > 0 ? '${line.regCode} ' : ''}${line.regReason.isEmpty ? 'OK' : line.regReason})'
+        ? tr('Registrada ({0}{1})', [line.regCode > 0 ? '${line.regCode} ' : '', line.regReason.isEmpty ? 'OK' : line.regReason])
         : '${reg.label}${line.regReason.isNotEmpty ? ' · ${line.regCode > 0 ? '${line.regCode} ' : ''}${line.regReason}' : ''}';
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Expanded(
+          Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Cuentas SIP • FreePBX', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              Text(tr('Cuentas SIP • FreePBX'), style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
               SizedBox(height: 2),
-              Text('Instancia PJSIP nativa • Almacenamiento seguro (Llavero del sistema)',
+              Text(tr('Instancia PJSIP nativa • Almacenamiento seguro (Llavero del sistema)'),
                   style: TextStyle(color: NxColors.faint, fontSize: 10.5)),
             ]),
           ),
           const SizedBox(width: 10),
           PopupMenuButton<int>(
-            tooltip: 'Seleccionar línea',
+            tooltip: tr('Seleccionar línea'),
             onSelected: (i) async {
               if (i == -1) {
                 await app.addLine();
@@ -186,11 +193,11 @@ class _AccountsTabState extends State<AccountsTab> {
                   child: Row(children: [
                     StatusDot(regColor(l.reg)),
                     const SizedBox(width: 10),
-                    Text('Línea ${l.number} (Ext. ${l.extension})'),
+                    Text(tr('Línea {0} (Ext. {1})', [l.number, l.extension])),
                   ]),
                 ),
               if (lines.length < 8)
-                const PopupMenuItem(value: -1, child: Text('+ Añadir línea', style: TextStyle(color: NxColors.gold))),
+                PopupMenuItem(value: -1, child: Text(tr('+ Añadir línea'), style: TextStyle(color: NxColors.gold))),
             ],
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
@@ -200,7 +207,7 @@ class _AccountsTabState extends State<AccountsTab> {
                 border: Border.all(color: NxColors.border),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text('Línea ${line.number} (Ext. ${line.extension})', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                Text(tr('Línea {0} (Ext. {1})', [line.number, line.extension]), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
                 const SizedBox(width: 4),
                 const Icon(Icons.unfold_more, size: 14),
               ]),
@@ -212,19 +219,19 @@ class _AccountsTabState extends State<AccountsTab> {
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _row([
-              _field('Nombre identidad', _name, hint: 'Despacho Dirección'),
-              _field('Usuario / Extensión SIP', _user, mono: true, hint: '201'),
+              _field(tr('Nombre identidad'), _name, hint: tr('Despacho Dirección')),
+              _field(tr('Usuario / Extensión SIP'), _user, mono: true, hint: '201'),
             ]),
             const SizedBox(height: 10),
             _row([
-              _field(_hasPassword ? 'Contraseña SIP (guardada en Llavero)' : 'Contraseña SIP', _pass,
-                  obscure: true, hint: _hasPassword ? '••••••••••••' : 'Secreto de la extensión'),
-              _field('Servidor FreePBX / IP', _server, mono: true, hint: 'pbx.empresa.local'),
+              _field(_hasPassword ? tr('Contraseña SIP (guardada en Llavero)') : tr('Contraseña SIP'), _pass,
+                  obscure: true, hint: _hasPassword ? '••••••••••••' : tr('Secreto de la extensión')),
+              _field(tr('Servidor FreePBX / IP'), _server, mono: true, hint: 'pbx.empresa.local'),
             ]),
             const SizedBox(height: 10),
             _row([
-              _field('Puerto', _port, mono: true, fmt: [FilteringTextInputFormatter.digitsOnly]),
-              _dropdown<SipTransport>('Transporte', _transport, const [
+              _field(tr('Puerto'), _port, mono: true, fmt: [FilteringTextInputFormatter.digitsOnly]),
+              _dropdown<SipTransport>(tr('Transporte'), _transport, const [
                 (SipTransport.udp, 'UDP'),
                 (SipTransport.tcp, 'TCP'),
                 (SipTransport.tls, 'TLS'),
@@ -235,16 +242,32 @@ class _AccountsTabState extends State<AccountsTab> {
                   _transport = v;
                 });
               }),
-              _field('Expiración (s)', _expires, mono: true, fmt: [FilteringTextInputFormatter.digitsOnly]),
+              _field(tr('Expiración (s)'), _expires, mono: true, fmt: [FilteringTextInputFormatter.digitsOnly]),
             ]),
             const SizedBox(height: 12),
-            const Text('Códecs de audio habilitados (prioridad PJSIP, todas las líneas)',
-                style: TextStyle(color: NxColors.muted, fontWeight: FontWeight.w600, fontSize: 10.5)),
-            const SizedBox(height: 5),
-            _CodecChips(
-              codecs: _codecs,
-              onChanged: (l) => setState(() => _codecs = l),
-            ),
+            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Expanded(
+                child: _dropdown<int>(tr('Timbre de esta línea'), _ringTone, [
+                  (-1, tr('El general ({0})', [NotificationManager.ringTones[app.notifications.ringTone] ?? 'Trino digital'])),
+                  for (final e in NotificationManager.ringTones.entries) (e.key, e.value),
+                ], (v) => setState(() => _ringTone = v)),
+              ),
+              const SizedBox(width: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: IconButton(
+                  tooltip: tr('Escuchar'),
+                  icon: Icon(Icons.play_circle_outline, color: NxColors.goldDark),
+                  onPressed: () => app.notifications.previewTone(_ringTone >= 0 ? _ringTone : app.notifications.ringTone),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            _field(tr('Colas que atiende'), _lineQueues, mono: true, hint: '400, 401',
+                fmt: [FilteringTextInputFormatter.allow(RegExp(r'[0-9, ]'))]),
+            const SizedBox(height: 4),
+            Text(tr('Números de cola de FreePBX separados por comas. En el panel "En espera", Atender pasa las llamadas de esas colas a esta línea. Vacío: ninguna.'),
+                style: TextStyle(fontSize: 10, color: NxColors.gray500, height: 1.35)),
             const SizedBox(height: 4),
             InkWell(
               onTap: () => setState(() => _advanced = !_advanced),
@@ -253,23 +276,23 @@ class _AccountsTabState extends State<AccountsTab> {
                 child: Row(children: [
                   Icon(_advanced ? Icons.expand_less : Icons.expand_more, color: NxColors.gold, size: 18),
                   const SizedBox(width: 2),
-                  const Text('Opciones avanzadas', style: TextStyle(color: NxColors.gold, fontWeight: FontWeight.w600, fontSize: 11.5)),
+                  Text(tr('Opciones avanzadas'), style: TextStyle(color: NxColors.gold, fontWeight: FontWeight.w600, fontSize: 11.5)),
                 ]),
               ),
             ),
             if (_advanced) ...[
               const SizedBox(height: 4),
               _row([
-                _field('Dominio SIP (opcional)', _domain, mono: true, hint: 'Igual que el servidor'),
-                _field('Usuario de autenticación', _authUser, mono: true, hint: 'Igual que la extensión'),
+                _field(tr('Dominio SIP (opcional)'), _domain, mono: true, hint: tr('Igual que el servidor')),
+                _field(tr('Usuario de autenticación'), _authUser, mono: true, hint: tr('Igual que la extensión')),
               ]),
               const SizedBox(height: 10),
               _row([
-                _field('Proxy de salida (opcional)', _proxy, mono: true, hint: 'host:puerto'),
-                _dropdown<int>('SRTP (cifrado de audio)', _srtp, const [
-                  (0, 'Desactivado'),
-                  (1, 'Opcional'),
-                  (2, 'Obligatorio'),
+                _field(tr('Proxy de salida (opcional)'), _proxy, mono: true, hint: 'host:puerto'),
+                _dropdown<int>(tr('SRTP (cifrado de audio)'), _srtp, [
+                  (0, tr('Desactivado')),
+                  (1, tr('Opcional')),
+                  (2, tr('Obligatorio')),
                 ], (v) => setState(() => _srtp = v)),
               ]),
               const SizedBox(height: 8),
@@ -278,7 +301,7 @@ class _AccountsTabState extends State<AccountsTab> {
                 dense: true,
                 value: _enabled,
                 onChanged: (v) => setState(() => _enabled = v),
-                title: const Text('Línea activada', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                title: Text(tr('Línea activada'), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
               ),
               if (lines.length > 2)
                 Align(
@@ -286,7 +309,7 @@ class _AccountsTabState extends State<AccountsTab> {
                   child: TextButton.icon(
                     style: TextButton.styleFrom(foregroundColor: NxColors.red),
                     icon: const Icon(Icons.delete_outline, size: 18),
-                    label: Text('Eliminar línea ${line.number}'),
+                    label: Text(tr('Eliminar línea {0}', [line.number])),
                     onPressed: () async {
                       await app.removeLine(line);
                       setState(() {
@@ -300,9 +323,9 @@ class _AccountsTabState extends State<AccountsTab> {
             if (_saveError != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(_saveError!, style: const TextStyle(color: NxColors.red, fontWeight: FontWeight.w600, fontSize: 11.5)),
+                child: Text(_saveError!, style: TextStyle(color: NxColors.red, fontWeight: FontWeight.w600, fontSize: 11.5)),
               ),
-            const Divider(height: 18, color: NxColors.border),
+            Divider(height: 18, color: NxColors.border),
             Row(children: [
               StatusDot(regColor(reg), size: 8),
               const SizedBox(width: 7),
@@ -318,32 +341,26 @@ class _AccountsTabState extends State<AccountsTab> {
                 child: DarkButton(
                   height: 38,
                   fontSize: 12,
-                  label: _saving ? 'Guardando…' : 'Guardar y Probar Registro',
+                  label: _saving ? tr('Guardando…') : tr('Guardar y Probar Registro'),
                   onPressed: _saving ? null : _save,
                 ),
               ),
             ]),
           ]),
         ),
-        const SizedBox(height: 14),
-        const _BlfConfig(),
-        const SizedBox(height: 14),
-        const _QueueConfigPanel(),
-        const SizedBox(height: 14),
-        const _TagNamesPanel(),
       ],
     );
   }
 }
 
 /// Nombres de las 4 etiquetas de llamada (el color y el orden son fijos).
-class _TagNamesPanel extends StatefulWidget {
-  const _TagNamesPanel();
+class TagNamesPanel extends StatefulWidget {
+  const TagNamesPanel({super.key});
   @override
-  State<_TagNamesPanel> createState() => _TagNamesPanelState();
+  State<TagNamesPanel> createState() => TagNamesPanelState();
 }
 
-class _TagNamesPanelState extends State<_TagNamesPanel> {
+class TagNamesPanelState extends State<TagNamesPanel> {
   final app = AppController.I;
   late final Map<String, TextEditingController> _ctl = {for (final t in app.history.tags) t.id: TextEditingController(text: t.label)};
 
@@ -362,22 +379,22 @@ class _TagNamesPanelState extends State<_TagNamesPanel> {
       padding: const EdgeInsets.all(14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          const Expanded(
+          Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Etiquetas de llamada', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-              Text('Se marcan con un toque en la llamada o el historial · notas y etiquetas cifradas en local',
+              Text(tr('Etiquetas de llamada'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              Text(tr('Se marcan con un toque en la llamada o el historial · notas y etiquetas cifradas en local'),
                   style: TextStyle(fontSize: 10, color: NxColors.gray500)),
             ]),
           ),
           NxButton(
-            label: 'Guardar',
+            label: tr('Guardar'),
             tone: NxTone.dark,
             height: 28,
             radius: 10,
             fontSize: 11,
             onTap: () async {
               await app.history.renameTags({for (final e in _ctl.entries) e.key: e.value.text});
-              app.showToast('Nombres de etiquetas guardados');
+              app.showToast(tr('Nombres de etiquetas guardados'));
               setState(() {});
             },
           ),
@@ -408,13 +425,13 @@ class _TagNamesPanelState extends State<_TagNamesPanel> {
 }
 
 /// Panel de cola: conexión AMI con usuario limitado (contraseña en el Llavero).
-class _QueueConfigPanel extends StatefulWidget {
-  const _QueueConfigPanel();
+class QueueConfigPanel extends StatefulWidget {
+  const QueueConfigPanel({super.key});
   @override
-  State<_QueueConfigPanel> createState() => _QueueConfigPanelState();
+  State<QueueConfigPanel> createState() => QueueConfigPanelState();
 }
 
-class _QueueConfigPanelState extends State<_QueueConfigPanel> {
+class QueueConfigPanelState extends State<QueueConfigPanel> {
   final app = AppController.I;
   late final _host = TextEditingController(
       text: app.queue.config.host.isNotEmpty ? app.queue.config.host : (app.lines.lines.isNotEmpty ? app.lines.lines.first.account.server : ''));
@@ -434,7 +451,7 @@ class _QueueConfigPanelState extends State<_QueueConfigPanel> {
 
   Widget _f(String label, TextEditingController c, {bool obscure = false, bool mono = true, String? hint}) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: NxColors.gray500, fontWeight: FontWeight.w500, fontSize: 10)),
+        Text(label, style: TextStyle(color: NxColors.gray500, fontWeight: FontWeight.w500, fontSize: 10)),
         const SizedBox(height: 4),
         TextField(
           controller: c,
@@ -456,39 +473,41 @@ class _QueueConfigPanelState extends State<_QueueConfigPanel> {
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            const Expanded(
+            Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Panel de cola (FreePBX)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                Text('AMI con usuario limitado · read=call,agent · write=call', style: TextStyle(fontSize: 10, color: NxColors.gray500)),
+                Text(tr('Panel de cola (FreePBX)'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                Text(tr('AMI con usuario limitado · read=call,agent · write=call'), style: TextStyle(fontSize: 10, color: NxColors.gray500)),
               ]),
             ),
             SizedBox(height: 26, child: FittedBox(child: Switch(value: _enabled, onChanged: (v) => setState(() => _enabled = v)))),
           ]),
           const SizedBox(height: 10),
           Row(children: [
-            Expanded(flex: 5, child: _f('Servidor AMI', _host, hint: '192.168.1.10')),
+            Expanded(flex: 5, child: _f(tr('Servidor AMI'), _host, hint: '192.168.1.10')),
             const SizedBox(width: 8),
-            Expanded(flex: 2, child: _f('Puerto', _port)),
+            Expanded(flex: 2, child: _f(tr('Puerto'), _port)),
             const SizedBox(width: 8),
-            Expanded(flex: 3, child: _f('Colas', _queues, hint: '400')),
+            Expanded(flex: 3, child: _f(tr('Otras colas'), _queues, hint: '400')),
           ]),
           const SizedBox(height: 8),
           Row(children: [
-            Expanded(child: _f('Usuario AMI', _user)),
+            Expanded(child: _f(tr('Usuario AMI'), _user)),
             const SizedBox(width: 8),
-            Expanded(child: _f(q.hasPassword ? 'Contraseña (guardada en Llavero)' : 'Contraseña AMI', _pass, obscure: true, hint: q.hasPassword ? '••••••••' : '')),
+            Expanded(child: _f(q.hasPassword ? tr('Contraseña (guardada en Llavero)') : tr('Contraseña AMI'), _pass, obscure: true, hint: q.hasPassword ? '••••••••' : '')),
           ]),
+          const SizedBox(height: 8),
+          _lineQueuesSummary(),
           const SizedBox(height: 10),
           Row(children: [
             Led(ok ? NxColors.green : (q.state == AmiState.disabled ? NxColors.gray400 : NxColors.red500), size: 7),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(q.state == AmiState.disabled ? 'Desactivado' : q.stateText,
+              child: Text(q.state == AmiState.disabled ? tr('Desactivado') : q.stateText,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ok ? NxColors.greenText : NxColors.gray600)),
             ),
             NxButton(
-              label: 'Guardar y conectar',
+              label: tr('Guardar y conectar'),
               tone: NxTone.dark,
               height: 30,
               radius: 10,
@@ -512,14 +531,49 @@ class _QueueConfigPanelState extends State<_QueueConfigPanel> {
   }
 }
 
-/// Configuración de teclas BLF / órbitas de aparcamiento (máx. 6).
-class _BlfConfig extends StatefulWidget {
-  const _BlfConfig();
-  @override
-  State<_BlfConfig> createState() => _BlfConfigState();
+/// Resumen "qué cola atiende cada línea", bajo la conexión AMI.
+extension on QueueConfigPanelState {
+  Widget _lineQueuesSummary() {
+    final rows = [for (final l in app.lines.lines) if (l.account.enabled && l.account.queues.isNotEmpty) l];
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(color: NxColors.card, borderRadius: BorderRadius.circular(10), border: Border.all(color: NxColors.border)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(tr('Colas por línea'), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: NxColors.gray600)),
+        const SizedBox(height: 4),
+        if (rows.isEmpty)
+          Text(tr('Ninguna línea tiene colas asignadas: Atender usa la línea seleccionada. Asígnalas en Ajustes › Líneas SIP › Colas que atiende.'),
+              style: TextStyle(fontSize: 10, color: NxColors.gray500, height: 1.35))
+        else ...[
+          for (final l in rows)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(children: [
+                Text(tr('Línea {0}', [l.number]), style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: NxColors.text)),
+                Text('  ·  ext. ${l.extension}  →  ', style: TextStyle(fontFamily: kMono, fontSize: 10, color: NxColors.gray500)),
+                Expanded(
+                  child: Text(l.account.queues.join(', '),
+                      overflow: TextOverflow.ellipsis, style: TextStyle(fontFamily: kMono, fontSize: 10.5, fontWeight: FontWeight.w700, color: NxColors.goldDark)),
+                ),
+              ]),
+            ),
+          const SizedBox(height: 4),
+          Text(tr('"Otras colas": colas sin línea propia; se atienden con la línea seleccionada.'),
+              style: TextStyle(fontSize: 10, color: NxColors.gray500, height: 1.35)),
+        ],
+      ]),
+    );
+  }
 }
 
-class _BlfConfigState extends State<_BlfConfig> {
+/// Configuración de teclas BLF / órbitas de aparcamiento (máx. 6).
+class BlfConfigPanel extends StatefulWidget {
+  const BlfConfigPanel({super.key});
+  @override
+  State<BlfConfigPanel> createState() => BlfConfigPanelState();
+}
+
+class BlfConfigPanelState extends State<BlfConfigPanel> {
   final app = AppController.I;
 
   Future<void> _edit([BlfKey? k]) async {
@@ -530,17 +584,17 @@ class _BlfConfigState extends State<_BlfConfig> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setD) => AlertDialog(
-          title: Text(k == null ? 'Nueva tecla rápida' : 'Editar tecla rápida'),
+          title: Text(k == null ? tr('Nueva tecla rápida') : tr('Editar tecla rápida')),
           content: SizedBox(
             width: 320,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              TextField(controller: label, autofocus: true, decoration: const InputDecoration(labelText: 'Nombre (ej. Recepción)')),
+              TextField(controller: label, autofocus: true, decoration: InputDecoration(labelText: tr('Nombre (ej. Recepción)'))),
               const SizedBox(height: 10),
               TextField(
                 controller: ext,
                 style: const TextStyle(fontFamily: kMono),
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(labelText: park ? 'Órbita (71–78)' : 'Extensión a supervisar'),
+                decoration: InputDecoration(labelText: park ? tr('Órbita (71–78)') : tr('Extensión a supervisar')),
               ),
               const SizedBox(height: 6),
               SwitchListTile(
@@ -548,7 +602,7 @@ class _BlfConfigState extends State<_BlfConfig> {
                 contentPadding: EdgeInsets.zero,
                 value: park,
                 onChanged: (v) => setD(() => park = v),
-                title: const Text('Órbita de aparcamiento (park)', style: TextStyle(fontSize: 12)),
+                title: Text(tr('Órbita de aparcamiento (park)'), style: TextStyle(fontSize: 12)),
               ),
             ]),
           ),
@@ -560,21 +614,21 @@ class _BlfConfigState extends State<_BlfConfig> {
                   app.blf.keys.remove(k);
                   Navigator.pop(ctx, true);
                 },
-                child: const Text('Eliminar'),
+                child: Text(tr('Eliminar')),
               ),
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(tr('Cancelar'))),
             TextButton(
               onPressed: () {
                 if (ext.text.trim().isEmpty) return;
                 final key = k ?? BlfKey(id: newId(), ext: '', label: '');
                 key
                   ..ext = ext.text.trim()
-                  ..label = label.text.trim().isEmpty ? (park ? 'Órbita ${ext.text.trim()}' : 'Ext. ${ext.text.trim()}') : label.text.trim()
+                  ..label = label.text.trim().isEmpty ? (park ? tr('Órbita {0}', [ext.text.trim()]) : tr('Ext. {0}', [ext.text.trim()])) : label.text.trim()
                   ..park = park;
                 if (k == null) app.blf.keys.add(key);
                 Navigator.pop(ctx, true);
               },
-              child: const Text('Guardar'),
+              child: Text(tr('Guardar')),
             ),
           ],
         ),
@@ -591,24 +645,24 @@ class _BlfConfigState extends State<_BlfConfig> {
       padding: const EdgeInsets.all(14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
-          const Expanded(
+          Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Teclas rápidas BLF y órbitas', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-              Text('SUBSCRIBE dialog · captura dirigida **ext · aparcamiento 70/71–78',
+              Text(tr('Teclas rápidas BLF y órbitas'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+              Text(tr('SUBSCRIBE dialog · captura dirigida **ext · aparcamiento 70/71–78'),
                   style: TextStyle(fontSize: 10, color: NxColors.gray500)),
             ]),
           ),
-          if (keys.length < BlfManager.maxKeys) NxButton(label: '+ Añadir', tone: NxTone.white, height: 28, radius: 10, fontSize: 11, onTap: _edit),
+          if (keys.length < BlfManager.maxKeys) NxButton(label: tr('+ Añadir'), tone: NxTone.white, height: 28, radius: 10, fontSize: 11, onTap: _edit),
         ]),
         const SizedBox(height: 10),
-        if (keys.isEmpty) const Text('Sin teclas configuradas', style: TextStyle(fontSize: 11, color: NxColors.gray400)),
+        if (keys.isEmpty) Text(tr('Sin teclas configuradas'), style: TextStyle(fontSize: 11, color: NxColors.gray400)),
         Wrap(spacing: 6, runSpacing: 6, children: [
           for (final k in keys)
             Tactile(
               onTap: () => _edit(k),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: NxColors.border)),
+                decoration: BoxDecoration(color: NxColors.card, borderRadius: BorderRadius.circular(10), border: Border.all(color: NxColors.border)),
                 child: Text('${k.label} · ${k.park ? 'Slot' : 'Ext.'} ${k.ext}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
               ),
             ),
@@ -618,8 +672,8 @@ class _BlfConfigState extends State<_BlfConfig> {
   }
 }
 
-class _CodecChips extends StatelessWidget {
-  const _CodecChips({required this.codecs, required this.onChanged});
+class CodecChips extends StatelessWidget {
+  const CodecChips({super.key, required this.codecs, required this.onChanged});
   final List<MapEntry<String, bool>> codecs;
   final ValueChanged<List<MapEntry<String, bool>>> onChanged;
 
@@ -664,8 +718,90 @@ class _CodecChips extends StatelessWidget {
           }),
       ]),
       const SizedBox(height: 4),
-      const Text('Toca para activar/desactivar · mantén pulsado para subir prioridad',
+      Text(tr('Toca para activar/desactivar · mantén pulsado para subir prioridad'),
           style: TextStyle(color: NxColors.faint, fontSize: 9.5)),
     ]);
   }
+}
+
+/// Actualizaciones desde una carpeta compartida (sin servidor).
+class UpdatesPanel extends StatefulWidget {
+  const UpdatesPanel({super.key});
+  @override
+  State<UpdatesPanel> createState() => UpdatesPanelState();
+}
+
+class UpdatesPanelState extends State<UpdatesPanel> {
+  final app = AppController.I;
+  late final _folder = TextEditingController(text: app.updates.folder);
+
+  @override
+  void dispose() {
+    _folder.dispose();
+    super.dispose();
+  }
+
+  String _result(String r) => switch (r) {
+        'nueva' => tr('Hay una versión nueva'),
+        'al día' => tr('Estás en la última versión'),
+        'no hay latest.json' => tr('La carpeta no tiene latest.json'),
+        'carpeta no accesible' => tr('No se puede acceder a la carpeta'),
+        'sin carpeta' => tr('Sin carpeta configurada'),
+        _ => '',
+      };
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: app.updates,
+        builder: (context, _) => NxPanel(
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(tr('Actualizaciones'), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            Text(tr('Versión {0} · la app mira cada 6 h el fichero latest.json de una carpeta compartida (NAS o red)', [kAppVersion]),
+                style: TextStyle(fontSize: 10, color: NxColors.gray500)),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _folder,
+                  style: const TextStyle(fontFamily: kMono, fontSize: 11.5),
+                  decoration: InputDecoration(hintText: Platform.isWindows ? r'\\NAS\noryxs' : '/Volumes/noryxs'),
+                  onSubmitted: app.updates.setFolder,
+                ),
+              ),
+              const SizedBox(width: 6),
+              NxButton(
+                label: tr('Elegir…'),
+                tone: NxTone.white,
+                height: 32,
+                radius: 10,
+                fontSize: 11,
+                onTap: () async {
+                  final p = await app.notifications.pickFile(title: tr('Elige el latest.json de la carpeta compartida'));
+                  if (p == null) return;
+                  _folder.text = File(p).parent.path;
+                  await app.updates.setFolder(_folder.text);
+                },
+              ),
+              const SizedBox(width: 6),
+              NxButton(
+                label: tr('Comprobar'),
+                tone: NxTone.dark,
+                height: 32,
+                radius: 10,
+                fontSize: 11,
+                onTap: () async {
+                  if (_folder.text.trim() != app.updates.folder) await app.updates.setFolder(_folder.text);
+                  final r = await app.updates.check();
+                  app.showToast(_result(r));
+                },
+              ),
+            ]),
+            if (app.updates.lastResult.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(_result(app.updates.lastResult), style: TextStyle(fontSize: 10.5, color: NxColors.gray600)),
+            ],
+          ]),
+        ),
+      );
 }

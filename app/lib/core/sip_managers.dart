@@ -1,5 +1,6 @@
 // Cuentas SIP, registro y líneas del terminal.
 import 'dart:math';
+import 'i18n.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -27,7 +28,7 @@ class SipAccountManager extends ChangeNotifier {
       accounts.addAll(data.cast<Map<String, dynamic>>().map(SipAccountConfig.fromJson));
     }
     while (accounts.length < minLines) {
-      accounts.add(SipAccountConfig(id: newId(), name: 'Línea ${accounts.length + 1}'));
+      accounts.add(SipAccountConfig(id: newId(), name: tr('Línea {0}', [accounts.length + 1])));
     }
     notifyListeners();
   }
@@ -52,7 +53,7 @@ class SipAccountManager extends ChangeNotifier {
 
   Future<SipAccountConfig?> addLine() async {
     if (accounts.length >= maxLines) return null;
-    final a = SipAccountConfig(id: newId(), name: 'Línea ${accounts.length + 1}');
+    final a = SipAccountConfig(id: newId(), name: tr('Línea {0}', [accounts.length + 1]));
     accounts.add(a);
     await save();
     return a;
@@ -122,13 +123,13 @@ class SipRegistrationManager {
     if (!a.enabled || !a.isComplete) {
       line.reg = RegState.unregistered;
       line.regCode = 0;
-      line.regReason = a.isComplete ? 'Desactivada' : 'Sin configurar';
+      line.regReason = a.isComplete ? tr('Desactivada') : tr('Sin configurar');
       _lines.changed();
       return;
     }
     if (pwd == null || pwd.isEmpty) {
       line.reg = RegState.unregistered;
-      line.regReason = 'Falta la contraseña';
+      line.regReason = tr('Falta la contraseña');
       _lines.changed();
       return;
     }
@@ -148,7 +149,7 @@ class SipRegistrationManager {
     line.accId = id;
     if (id < 0) {
       line.reg = RegState.error;
-      line.regReason = 'Configuración no válida ($id)';
+      line.regReason = tr('Configuración no válida ({0})', [id]);
     } else {
       line.reg = RegState.registering;
       line.regReason = '';

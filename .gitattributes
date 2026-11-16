@@ -1,0 +1,5 @@
+# Los scripts y Makefiles se ejecutan en bash (también en Windows/MSYS2): siempre LF
+*.sh text eol=lf
+Makefile* text eol=lf
+*.c text eol=lf
+*.h text eol=lf

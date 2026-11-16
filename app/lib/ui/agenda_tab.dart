@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/i18n.dart';
 import 'package:flutter/services.dart';
 
 import '../core/app_controller.dart';
@@ -32,18 +33,18 @@ class _AgendaTabState extends State<AgendaTab> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       children: [
         Row(children: [
-          const Expanded(child: Text('Agenda de Contactos', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
-          Tactile(onTap: _edit, child: const Text('+ Nuevo', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: NxColors.goldDark))),
+          Expanded(child: Text(tr('Agenda de Contactos'), style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700))),
+          Tactile(onTap: _edit, child: Text(tr('+ Nuevo'), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: NxColors.goldDark))),
           const SizedBox(width: 10),
-          const Text('Directorio Local', style: TextStyle(fontSize: 11, color: NxColors.gray400)),
+          Text(tr('Directorio Local'), style: TextStyle(fontSize: 11, color: NxColors.gray400)),
         ]),
         const SizedBox(height: 12),
         TextField(
           controller: _search,
           onChanged: (_) => setState(() {}),
           style: const TextStyle(fontSize: 12),
-          decoration: const InputDecoration(
-            hintText: 'Buscar por nombre, empresa o extensión...',
+          decoration: InputDecoration(
+            hintText: tr('Buscar por nombre, empresa o número…'),
             fillColor: NxColors.surface,
             contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           ),
@@ -53,9 +54,9 @@ class _AgendaTabState extends State<AgendaTab> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 36),
             child: Column(children: [
-              const Icon(Icons.people_outline, size: 32, color: NxColors.gray400),
+              Icon(Icons.people_outline, size: 32, color: NxColors.gray400),
               const SizedBox(height: 8),
-              Text(app.contacts.contacts.isEmpty ? 'La agenda está vacía' : 'Sin resultados', style: const TextStyle(color: NxColors.gray500, fontSize: 12)),
+              Text(app.contacts.contacts.isEmpty ? tr('La agenda está vacía') : tr('Sin resultados'), style: TextStyle(color: NxColors.gray500, fontSize: 12)),
             ]),
           ),
         for (final c in list) ...[
@@ -89,12 +90,12 @@ class _ContactRow extends StatelessWidget {
                     child: Text(contact.favorite ? '★' : '☆', style: TextStyle(fontSize: 12, color: contact.favorite ? NxColors.gold : NxColors.gray400)),
                   ),
                 ]),
-                if (contact.company.isNotEmpty) Text(contact.company, style: const TextStyle(fontSize: 11, color: NxColors.gray500)),
+                if (contact.company.isNotEmpty) Text(contact.company, style: TextStyle(fontSize: 11, color: NxColors.gray500)),
                 const SizedBox(height: 2),
-                Text(contact.number, style: const TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray700)),
+                Text(contact.number, style: TextStyle(fontFamily: kMono, fontSize: 12, color: NxColors.gray700)),
               ]),
             ),
-            NxButton(label: 'Llamar', tone: NxTone.dark, height: 32, radius: 12, onTap: onCall),
+            NxButton(label: tr('Llamar'), tone: NxTone.dark, height: 32, radius: 12, onTap: onCall),
           ]),
         ),
       );
@@ -137,26 +138,26 @@ class _ContactDialogState extends State<ContactDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-        title: Text(widget.contact == null ? 'Nuevo contacto' : 'Editar contacto'),
+        title: Text(widget.contact == null ? tr('Nuevo contacto') : tr('Editar contacto')),
         content: SizedBox(
           width: 340,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: _name, autofocus: true, decoration: const InputDecoration(labelText: 'Nombre')),
+            TextField(controller: _name, autofocus: true, decoration: InputDecoration(labelText: tr('Nombre'))),
             const SizedBox(height: 12),
             TextField(
               controller: _number,
               style: const TextStyle(fontFamily: kMono),
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9*#+ ]'))],
-              decoration: const InputDecoration(labelText: 'Número / extensión'),
+              decoration: InputDecoration(labelText: tr('Número / extensión')),
             ),
             const SizedBox(height: 12),
-            TextField(controller: _company, decoration: const InputDecoration(labelText: 'Empresa / departamento')),
+            TextField(controller: _company, decoration: InputDecoration(labelText: tr('Empresa / departamento'))),
             const SizedBox(height: 8),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _fav,
               onChanged: (v) => setState(() => _fav = v),
-              title: const Text('Favorito'),
+              title: Text(tr('Favorito')),
             ),
           ]),
         ),
@@ -170,12 +171,12 @@ class _ContactDialogState extends State<ContactDialog> {
                   await app.contacts.remove(widget.contact!);
                   if (context.mounted) Navigator.pop(context);
                 },
-                child: const Text('Eliminar'),
+                child: Text(tr('Eliminar')),
               ),
             const Spacer(),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar', style: TextStyle(color: NxColors.muted))),
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('Cancelar'), style: TextStyle(color: NxColors.muted))),
             const SizedBox(width: 8),
-            SizedBox(width: 110, child: DarkButton(height: 38, fontSize: 13, label: 'Guardar', onPressed: _save)),
+            SizedBox(width: 110, child: DarkButton(height: 38, fontSize: 13, label: tr('Guardar'), onPressed: _save)),
           ]),
         ],
       );

@@ -1,4 +1,7 @@
+// Los parámetros con nombre no pueden ser privados: los colores opcionales se guardan en campos privados.
+// ignore_for_file: prefer_initializing_formals
 import 'package:flutter/material.dart';
+import '../core/i18n.dart';
 
 import '../core/models.dart';
 import 'theme.dart';
@@ -92,11 +95,11 @@ class NxButton extends StatelessWidget {
         final (bg, bgHover, fg, border) = switch (tone) {
           NxTone.dark => (NxColors.dark, Colors.black, Colors.white, NxColors.dark),
           NxTone.surface => (NxColors.surface, NxColors.surfaceHover, NxColors.text, NxColors.border),
-          NxTone.white => (Colors.white, NxColors.surfaceHover, NxColors.text, NxColors.border),
-          NxTone.gold => (NxColors.goldSoft, const Color(0xFFF4EAD6), NxColors.goldDark, NxColors.gold),
+          NxTone.white => (NxColors.card, NxColors.surfaceHover, NxColors.text, NxColors.border),
+          NxTone.gold => (NxColors.goldSoft, NxColors.goldBar, NxColors.goldDark, NxColors.gold),
           NxTone.emerald => (NxColors.green600, NxColors.greenText, Colors.white, NxColors.green600),
           NxTone.red => (NxColors.red, NxColors.redText, Colors.white, NxColors.red),
-          NxTone.redSoft => (NxColors.redSoft, const Color(0xFFFEE2E2), NxColors.redText, NxColors.redBorder),
+          NxTone.redSoft => (NxColors.redSoft, NxColors.redBorder, NxColors.redText, NxColors.redBorder),
           NxTone.amber => (NxColors.amber, const Color(0xFFD97706), Colors.white, NxColors.amber),
         };
         final enabled = onTap != null;
@@ -135,9 +138,13 @@ class NxButton extends StatelessWidget {
 
 class Pill extends StatelessWidget {
   const Pill(this.text,
-      {super.key, this.fg = NxColors.gray700, this.bg = NxColors.surfaceHover, this.border, this.mono = false, this.size = 10, this.compact = false, this.round = false});
+      {super.key, Color? fg, Color? bg, this.border, this.mono = false, this.size = 10, this.compact = false, this.round = false})
+      : _fg = fg,
+        _bg = bg;
   final String text;
-  final Color fg, bg;
+  final Color? _fg, _bg;
+  Color get fg => _fg ?? NxColors.gray700;
+  Color get bg => _bg ?? NxColors.surfaceHover;
   final Color? border;
   final bool mono, compact, round;
   final double size;
@@ -274,9 +281,10 @@ class LightButton extends StatelessWidget {
 
 /// Botón "Llamar" de las listas (agenda, historial, buzón).
 class SquareCallButton extends StatelessWidget {
-  const SquareCallButton({super.key, required this.onTap, this.label = 'Llamar', this.light = false});
+  const SquareCallButton({super.key, required this.onTap, String? label, this.light = false}) : _label = label;
   final VoidCallback? onTap;
-  final String label;
+  final String? _label;
+  String get label => _label ?? tr('Llamar');
   final bool light;
   @override
   Widget build(BuildContext context) => NxButton(

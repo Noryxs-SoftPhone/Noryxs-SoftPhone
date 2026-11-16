@@ -111,6 +111,25 @@ NX_API int32_t nx_secret_delete(const char *key);
 /* ---- No molestar (rechaza entrantes con 486 Busy Here) ---- */
 NX_API int32_t nx_set_dnd(int32_t on);
 
+/* Cifrado con PIN (paquetes de configuración de puestos):
+ * "SSP1:" + base64( sal[16] | IV[16] | AES-256-CBC | HMAC-SHA256[32] ), clave = PBKDF2-SHA256(PIN, sal, 200000).
+ * nx_pin_unseal devuelve NULL si el PIN es incorrecto o el paquete está manipulado. Liberar con nx_free. */
+NX_API char *nx_pin_seal(const char *plain, const char *pin);
+
+/* Transcripción local (whisper.cpp) de un WAV grabado. Bloqueante: llamar desde otro hilo.
+ * lang: "es", "ca", "en" o "auto". Devuelve texto con [mm:ss] por segmento o NULL (nx_free).
+ * No disponible en iOS. */
+NX_API char *nx_transcribe(const char *wav, const char *model, const char *lang, int32_t threads);
+NX_API char *nx_pin_unseal(const char *sealed, const char *pin);
+
+/* Reproductor de WAV por el altavoz (grabaciones, buzón). Evento {"type":"play","state":"end"} al acabar. */
+NX_API int32_t nx_play_start(const char *path);   /* duración en ms o < 0 */
+NX_API int32_t nx_play_stop(void);
+NX_API int32_t nx_play_pos(void);                 /* ms, o -1 si no reproduce */
+NX_API int32_t nx_play_seek(int32_t ms);
+/* No molestar solo para una cuenta (línea): sus entrantes reciben 486. */
+NX_API int32_t nx_set_dnd_acc(int32_t acc_id, int32_t on);
+
 /* ---- BLF: SUBSCRIBE Event: dialog (dialog-info+xml) ----
  * target: "205" (se completa con el servidor de la cuenta) o URI completa.
  * Devuelve buddy_id >= 0. Eventos: {"type":"blf", buddy_id, dialog_state, direction, ...} */

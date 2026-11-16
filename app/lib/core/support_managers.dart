@@ -1,4 +1,7 @@
 // Audio, códecs, agenda, historial y avisos.
+import 'feature_managers.dart';
+import 'i18n.dart';
+import 'search.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -36,15 +39,15 @@ class AudioDeviceManager extends ChangeNotifier {
   List<MapEntry<String, bool>> codecs = [
     const MapEntry('G722/16000/1', true),
     const MapEntry('opus/48000/2', true),
-    const MapEntry('PCMA/8000/1', true),
-    const MapEntry('PCMU/8000/1', true),
+    MapEntry('PCMA/8000/1', true),
+    MapEntry('PCMU/8000/1', true),
   ];
 
   static String codecLabel(String id) => switch (id.split('/').first.toUpperCase()) {
         'G722' => 'G.722 (HD)',
-        'OPUS' => 'Opus',
-        'PCMA' => 'G.711 A-law',
-        'PCMU' => 'G.711 µ-law',
+        'OPUS' => tr('Opus'),
+        'PCMA' => tr('G.711 A-law'),
+        'PCMU' => tr('G.711 µ-law'),
         final s => s,
       };
 
@@ -139,8 +142,8 @@ class AudioDeviceManager extends ChangeNotifier {
 
   /// Nombre corto del dispositivo de salida para la cabecera.
   String get outputLabel {
-    final n = playbackName ?? 'Audio';
-    if (n.toLowerCase().contains('usb')) return 'USB Audio';
+    final n = playbackName ?? tr('Audio');
+    if (n.toLowerCase().contains('usb')) return tr('USB Audio');
     return n.length > 16 ? '${n.substring(0, 15)}…' : n;
   }
 }
@@ -165,9 +168,8 @@ class ContactManager extends ChangeNotifier {
   }
 
   List<Contact> search(String q) {
-    final s = q.trim().toLowerCase();
     final list = contacts
-        .where((c) => s.isEmpty || c.name.toLowerCase().contains(s) || c.number.contains(s) || c.company.toLowerCase().contains(s))
+        .where((c) => matchesQuery(q, texts: [c.name, c.company, c.number], numbers: [c.number]))
         .toList()
       ..sort((a, b) {
         if (a.favorite != b.favorite) return a.favorite ? -1 : 1;
@@ -226,20 +228,76 @@ class CallHistoryManager extends ChangeNotifier {
   static const maxNote = 280;
   final List<HistoryEntry> entries = [];
 
+  /// Perdidas marcadas a mano como atendidas (ids), aunque no se hayan devuelto desde aquí.
+  final Set<String> _pendingDone = {};
+  static const _pendingFile = 'pending_done.json';
+
+  /// Perdidas pendientes de devolver: la última llamada con ese número es una perdida
+  /// (no se devolvió ni se volvió a hablar con él después) y no se marcó como atendida.
+  /// Una por número, la más reciente.
+  List<HistoryEntry> get pendingMissed {
+    final seen = <String>[];
+    final out = <HistoryEntry>[];
+    for (final e in entries) {
+      if (e.number.isEmpty || seen.any((n) => PhoneNumbers.same(n, e.number))) continue;
+      seen.add(e.number);
+      if (e.type == HistoryType.missed && !_pendingDone.contains(e.id)) out.add(e);
+    }
+    return out;
+  }
+
+  bool isPending(HistoryEntry e) => pendingMissed.any((p) => p.id == e.id);
+
+  Future<void> markHandled(HistoryEntry e) async {
+    _pendingDone.add(e.id);
+    notifyListeners();
+    await _storage.write(_pendingFile, _pendingDone.toList());
+  }
+
   /// Las 4 etiquetas (nombres configurables).
   final List<CallTag> tags = [
-    CallTag(id: 't1', label: 'Presupuesto', color: 'gold'),
-    CallTag(id: 't2', label: 'Urgente', color: 'red'),
-    CallTag(id: 't3', label: 'Devolver llamada', color: 'sky'),
-    CallTag(id: 't4', label: 'Resuelto', color: 'green'),
+    CallTag(id: 't1', label: tr('Presupuesto'), color: 'gold'),
+    CallTag(id: 't2', label: tr('Urgente'), color: 'red'),
+    CallTag(id: 't3', label: tr('Devolver llamada'), color: 'sky'),
+    CallTag(id: 't4', label: tr('Resuelto'), color: 'green'),
   ];
 
   CallTag? tagById(String id) => tags.where((t) => t.id == id).firstOrNull;
 
+  /// Enlaza con su llamada las grabaciones que aún no lo están (versiones anteriores):
+  /// el nombre del WAV lleva fecha, hora y número (AAAA-MM-DD_HHMMSS_L1_numero.wav).
+  bool _linkOrphanRecordings() {
+    final dir = Directory(recordingsDir());
+    if (!dir.existsSync()) return false;
+    final linked = <String>{for (final e in entries) ...e.recordings};
+    final re = RegExp(r'(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})_L\d+_([^.]*)\.wav$');
+    var changed = false;
+    for (final f in dir.listSync().whereType<File>()) {
+      if (linked.contains(f.path)) continue;
+      final m = re.firstMatch(f.path);
+      if (m == null) continue;
+      final t = DateTime(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!), int.parse(m[4]!), int.parse(m[5]!), int.parse(m[6]!));
+      final who = m[7]!;
+      for (final e in entries) {
+        final num = e.number.replaceAll(RegExp(r'[^0-9A-Za-z+]'), '');
+        final end = e.start.add(Duration(seconds: e.durationSec + 90));
+        if ((num == who || (num.isEmpty && who == 'oculto')) && !t.isBefore(e.start.subtract(const Duration(seconds: 5))) && t.isBefore(end)) {
+          e.recordings.add(f.path);
+          changed = true;
+          break;
+        }
+      }
+    }
+    return changed;
+  }
+
   Future<void> load() async {
+    final pd = await _storage.read(_pendingFile);
+    if (pd is List) _pendingDone.addAll(pd.whereType<String>());
     final d = await _storage.read(_file);
     entries.clear();
     if (d is List) entries.addAll(d.cast<Map<String, dynamic>>().map(HistoryEntry.fromJson));
+    if (_linkOrphanRecordings()) await _saveEntries();
     final t = await _storage.read(_tagsFile);
     if (t is Map<String, dynamic>) {
       for (final tag in tags) {
@@ -291,6 +349,7 @@ class CallHistoryManager extends ChangeNotifier {
         durationSec: c.duration.inSeconds,
         note: c.note.trim(),
         tags: List.of(c.tags),
+        recordings: List.of(c.recordings),
       ),
     );
     if (entries.length > _max) entries.removeRange(_max, entries.length);
@@ -351,11 +410,11 @@ class CallHistoryManager extends ChangeNotifier {
     final who = contactName.isNotEmpty ? '$contactName (${e.number})' : (e.name.isNotEmpty && e.name != e.number ? '${e.name} (${e.number})' : e.number);
     final dur = Duration(seconds: e.durationSec);
     final durTxt = '${two(dur.inMinutes)}:${two(dur.inSeconds % 60)}';
-    final kind = switch (e.type) { HistoryType.outgoing => 'Saliente', HistoryType.incoming => 'Entrante', HistoryType.missed => 'Perdida' };
-    final b = StringBuffer('[NORYXS SIP] $date • Ext. ${e.extension.isEmpty ? '-' : e.extension} $arrow $who ($kind · Duración: $durTxt)');
+    final kind = switch (e.type) { HistoryType.outgoing => tr('Saliente'), HistoryType.incoming => tr('Entrante'), HistoryType.missed => tr('Perdida') };
+    final b = StringBuffer(tr('[NORYXS SIP] {0} • Ext. {1} {2} {3} ({4} · Duración: {5})', [date, e.extension.isEmpty ? '-' : e.extension, arrow, who, kind, durTxt]));
     final tagNames = e.tags.map((id) => tagById(id)?.label).whereType<String>().toList();
-    if (tagNames.isNotEmpty) b.write(' | Etiquetas: ${tagNames.join(', ')}');
-    if (e.note.trim().isNotEmpty) b.write(' | Nota: ${e.note.trim().replaceAll('\n', ' ')}');
+    if (tagNames.isNotEmpty) b.write(tr(' | Etiquetas: {0}', [tagNames.join(', ')]));
+    if (e.note.trim().isNotEmpty) b.write(tr(' | Nota: {0}', [e.note.trim().replaceAll('\n', ' ')]));
     return b.toString();
   }
 }
@@ -380,9 +439,17 @@ class NotificationManager extends ChangeNotifier {
   bool launchAtLogin = true;
   bool systemNotification = false;
 
+  /// Atajos globales (⌃⌥A / ⌃⌥H / ⌃⌥M en macOS, Ctrl+Alt+… en Windows).
+  bool hotkeys = true;
+
+  /// Acción de un atajo o del botón de los cascos: answer | hangup | mute | headset.
+  void Function(String action)? onHotkey;
+  bool _mediaActive = false;
+  String _mediaTitle = '';
+
   /// Tono de llamada: 0 trino, 2 clásico, 3 suave.
   int ringTone = 0;
-  static const ringTones = {0: 'Trino digital', 2: 'Clásico', 3: 'Carillón suave'};
+  static Map<int, String> get ringTones => {0: tr('Trino digital'), 2: tr('Clásico'), 3: tr('Carillón suave')};
 
   bool _ringing = false;
   bool _waitingTone = false;
@@ -398,27 +465,34 @@ class NotificationManager extends ChangeNotifier {
     return {
       'callId': c.callId,
       'lineBadge': line.toUpperCase(),
-      'name': c.displayName.isEmpty ? 'Número oculto' : c.displayName,
+      'name': c.displayName.isEmpty ? tr('Número oculto') : c.displayName,
       'number': c.displayName != c.remoteNumber ? c.remoteNumber : '',
       'initials': initials,
       'note': active != null
-          ? 'Al contestar se retendrá ${active.displayName}'
-          : (ctx.lastNote.isNotEmpty ? 'Última nota: ${ctx.lastNote}' : 'Destino: $line'),
+          ? tr('Al contestar se retendrá {0}', [active.displayName])
+          : (ctx.lastNote.isNotEmpty ? tr('Última nota: {0}', [ctx.lastNote]) : tr('Destino: {0}', [line])),
       'geo': ctx.geo,
       'lastNote': ctx.lastNote,
       'muted': c.ringSilenced,
       'card': floatingCard,
       'notify': systemNotification,
-      'title': 'Llamada entrante · $line',
-      'body': c.displayName.isEmpty ? 'Número oculto' : c.displayName,
+      'title': tr('Llamada entrante · {0}', [line]),
+      'body': c.displayName.isEmpty ? tr('Número oculto') : c.displayName,
     };
   }
 
   void Function()? onWake;
+
+  /// Clic para llamar: enlace tel:/sip:/callto: abierto con la app.
+  void Function(String url)? onOpenUrl;
   void Function(int callId)? onAnswerFromNotification;
   void Function(int callId)? onRejectFromNotification;
   void Function(int callId)? onSilenceFromNotification;
   String Function(CallSession c)? describeLine;
+
+  /// Timbre de la línea de la llamada (-1 = el general).
+  int Function(CallSession c)? toneFor;
+  int _currentTone = -1;
 
   /// Origen del número y última nota (para la tarjeta flotante / notificación).
   ({String geo, String lastNote}) Function(CallSession c)? callerContext;
@@ -427,6 +501,7 @@ class NotificationManager extends ChangeNotifier {
     final s = await _storage.read(_file);
     if (s is Map<String, dynamic>) {
       floatingCard = s['floatingCard'] as bool? ?? true;
+      hotkeys = s['hotkeys'] as bool? ?? true;
       launchAtLogin = s['launchAtLogin'] as bool? ?? true;
       systemNotification = s['systemNotification'] as bool? ?? false;
       ringTone = (s['ringTone'] as num?)?.toInt() ?? 0;
@@ -436,6 +511,12 @@ class NotificationManager extends ChangeNotifier {
       switch (call.method) {
         case 'wake':
           onWake?.call();
+        case 'hotkey':
+          final a = args['action'] as String? ?? '';
+          if (a.isNotEmpty) onHotkey?.call(a);
+        case 'openUrl':
+          final u = args['url'] as String? ?? '';
+          if (u.isNotEmpty) onOpenUrl?.call(u);
         case 'notificationAction':
           final id = (args['callId'] as num?)?.toInt() ?? -1;
           if (args['action'] == 'answer') onAnswerFromNotification?.call(id);
@@ -444,12 +525,24 @@ class NotificationManager extends ChangeNotifier {
       }
       return null;
     });
+    // Enlaces que llegaron antes de que Dart escuchara (p. ej. la app se abrió con un tel:)
+    try {
+      final pending = await _channel.invokeMethod<List<dynamic>>('urlHandlerReady');
+      for (final u in pending ?? const []) {
+        if (u is String && u.isNotEmpty) onOpenUrl?.call(u);
+      }
+    } catch (_) {}
     if (systemNotification || Platform.isIOS) _invoke('requestNotificationPermission');
     if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) _invoke('setLaunchAtLogin', {'enabled': launchAtLogin});
+    if (Platform.isMacOS || Platform.isWindows) _invoke('setHotkeys', {'enabled': hotkeys});
   }
 
-  Future<void> setPrefs({bool? card, bool? notify, int? tone, bool? login}) async {
+  Future<void> setPrefs({bool? card, bool? notify, int? tone, bool? login, bool? keys}) async {
     if (card != null) floatingCard = card;
+    if (keys != null) {
+      hotkeys = keys;
+      _invoke('setHotkeys', {'enabled': keys});
+    }
     if (login != null) {
       launchAtLogin = login;
       _invoke('setLaunchAtLogin', {'enabled': login});
@@ -463,7 +556,41 @@ class NotificationManager extends ChangeNotifier {
       if (notify) _invoke('requestNotificationPermission');
     }
     notifyListeners();
-    await _storage.write(_file, {'floatingCard': floatingCard, 'systemNotification': systemNotification, 'ringTone': ringTone, 'launchAtLogin': launchAtLogin});
+    await _storage.write(_file, {'floatingCard': floatingCard, 'systemNotification': systemNotification, 'ringTone': ringTone, 'launchAtLogin': launchAtLogin, 'hotkeys': hotkeys});
+  }
+
+  /// Selector de ficheros nativo: ruta elegida o null.
+  Future<String?> pickFile({String title = ''}) async {
+    try {
+      return await _channel.invokeMethod<String>('pickFile', {'title': title});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> saveFile(String name, {String title = ''}) async {
+    try {
+      return await _channel.invokeMethod<String>('saveFile', {'name': name, 'title': title});
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Pide al sistema que NORYXS abra los enlaces tel:/sip:/callto:.
+  Future<bool> setDefaultDialer() async {
+    try {
+      return await _channel.invokeMethod<bool>('setDefaultDialer') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isDefaultDialer() async {
+    try {
+      return await _channel.invokeMethod<bool>('isDefaultDialer') ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Escucha el tono seleccionado durante 3 s.
@@ -477,6 +604,15 @@ class NotificationManager extends ChangeNotifier {
 
   /// Se llama en cada cambio de llamadas.
   void update(List<CallSession> calls) {
+    // 0) Botón de los cascos: activo solo mientras hay una llamada sonando o en curso
+    final live = calls.where((c) => c.state.isLive).toList();
+    final active = live.isNotEmpty;
+    final title = active ? live.first.displayName : '';
+    if (active != _mediaActive || (active && title != _mediaTitle)) {
+      _mediaActive = active;
+      _mediaTitle = title;
+      _invoke('setMediaSession', {'active': active, 'title': title.isEmpty ? tr('Llamada') : title});
+    }
     // 1) Avisar de llamadas entrantes nuevas
     for (final c in calls) {
       if (c.state == CallState.incoming && !_alerted.contains(c.callId)) {
@@ -509,9 +645,12 @@ class NotificationManager extends ChangeNotifier {
     final ringingCalls = calls.where((c) => c.state == CallState.incoming && !c.ringSilenced);
     final busy = calls.any((c) => c.state == CallState.active || c.state == CallState.held);
     final shouldRing = ringingCalls.isNotEmpty;
-    if (shouldRing && (!_ringing || _waitingTone != busy)) {
-      _engine.ringStart(waiting: busy, tone: ringTone);
+    final lineTone = shouldRing ? (toneFor?.call(ringingCalls.first) ?? -1) : -1;
+    final tone = lineTone >= 0 ? lineTone : ringTone;
+    if (shouldRing && (!_ringing || _waitingTone != busy || _currentTone != tone)) {
+      _engine.ringStart(waiting: busy, tone: tone);
       _waitingTone = busy;
+      _currentTone = tone;
       _ringing = true;
     } else if (!shouldRing && _ringing) {
       _engine.ringStop();

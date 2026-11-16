@@ -64,6 +64,8 @@ Se comporta como un terminal físico Yealink / Fanvil / Grandstream, pero instal
 - Pantalla de arranque animada, logotipo vectorial, tipografías Inter y JetBrains Mono.
 - Agenda con favoritos, historial (entrantes, salientes, perdidas) con rellamada por la misma línea.
 - **Notas rápidas y etiquetas por llamada** (cifradas en local), filtro por etiqueta y **Copiar resumen** como comprobante.
+- **Transcripción local de las llamadas grabadas** (whisper.cpp, modelo Base incluido): automática al colgar, cifrada y buscable desde el historial. El audio no sale del ordenador.
+- **Perdidas pendientes de devolver**, aviso de **conexión inestable**, reducción de ruido y volumen automático.
 - **Identificación offline del llamante** (provincia/país, móvil/fijo) y **última nota antes de descolgar**.
 - Botón en la cabecera para **mostrar/ocultar el panel de cola**.
 - Contraseñas en el **Llavero del sistema**, nunca en ficheros ni en logs.
@@ -152,6 +154,20 @@ Requisitos: macOS en Apple Silicon, Xcode, [Flutter](https://docs.flutter.dev/ge
 ```bash
 brew install openssl@3 opus pkgconf
 ```
+
+### Atajo
+
+`packaging/compilar_mac.sh` compila el motor y la app en Release con versión, commit y fecha (se ven en Ajustes › Acerca de) y la instala en /Applications.
+
+### 0. Transcripción (opcional)
+
+```bash
+brew install cmake
+packaging/compilar_whisper.sh     # whisper.cpp v1.9.5 → third_party/whisper.cpp/build
+packaging/descargar_modelo.sh     # modelo Base q5_1 (57 MB) → app/assets/models/
+```
+
+Sin estos pasos el motor se compila sin transcripción y la app la oculta. Igual en Linux y en MSYS2 UCRT64 (Windows: `pacman -S mingw-w64-ucrt-x86_64-{cmake,ninja}`).
 
 ### 1. PJSIP 2.17
 

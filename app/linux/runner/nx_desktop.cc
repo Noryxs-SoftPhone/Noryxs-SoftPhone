@@ -47,6 +47,15 @@ struct Desktop {
   GtkWidget* note_label = nullptr;
   GtkWidget* mute_button = nullptr;
   int64_t card_call_id = -1;
+
+  // Clic para llamar
+  std::vector<std::string> pending_urls;
+  bool url_ready = false;
+
+  // Botón de los cascos (MPRIS), solo durante las llamadas
+  guint mpris_owner = 0;
+  GDBusNodeInfo* mpris_info = nullptr;
+  std::string mpris_title;
 };
 
 Desktop* D = nullptr;
@@ -467,6 +476,80 @@ void StartDrag() {
   gtk_window_begin_move_drag(D->window, 1, x, y, GDK_CURRENT_TIME);
 }
 
+
+// ---- Botón de los cascos: reproductor MPRIS (GNOME, KDE, XFCE; Wayland y X11) ----
+// Mientras suena o dura una llamada, NORYXS aparece como "reproductor" y recibe la
+// tecla reproducir/pausa de los cascos o del teclado.
+
+const char kMprisXml[] =
+    "<node>"
+    " <interface name='org.mpris.MediaPlayer2'>"
+    "  <method name='Raise'/><method name='Quit'/>"
+    "  <property name='CanQuit' type='b' access='read'/><property name='CanRaise' type='b' access='read'/>"
+    "  <property name='HasTrackList' type='b' access='read'/><property name='Identity' type='s' access='read'/>"
+    "  <property name='SupportedUriSchemes' type='as' access='read'/><property name='SupportedMimeTypes' type='as' access='read'/>"
+    " </interface>"
+    " <interface name='org.mpris.MediaPlayer2.Player'>"
+    "  <method name='PlayPause'/><method name='Play'/><method name='Pause'/><method name='Stop'/>"
+    "  <method name='Next'/><method name='Previous'/>"
+    "  <property name='PlaybackStatus' type='s' access='read'/><property name='Metadata' type='a{sv}' access='read'/>"
+    "  <property name='CanPlay' type='b' access='read'/><property name='CanPause' type='b' access='read'/>"
+    "  <property name='CanControl' type='b' access='read'/><property name='CanGoNext' type='b' access='read'/>"
+    "  <property name='CanGoPrevious' type='b' access='read'/><property name='CanSeek' type='b' access='read'/>"
+    " </interface>"
+    "</node>";
+
+void MprisMethod(GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar* method, GVariant*,
+                 GDBusMethodInvocation* inv, gpointer) {
+  if (g_str_has_prefix(method, "Play") || strcmp(method, "Pause") == 0 || strcmp(method, "Stop") == 0) {
+    g_autoptr(FlValue) args = fl_value_new_map();
+    fl_value_set_string_take(args, "action", fl_value_new_string("headset"));
+    Invoke("hotkey", args);
+  } else if (strcmp(method, "Raise") == 0) {
+    nx_desktop_present();
+  }
+  g_dbus_method_invocation_return_value(inv, nullptr);
+}
+
+GVariant* MprisProperty(GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar* prop, GError**,
+                        gpointer) {
+  if (strcmp(prop, "Identity") == 0) return g_variant_new_string("NORYXS");
+  if (strcmp(prop, "PlaybackStatus") == 0) return g_variant_new_string("Playing");
+  if (strcmp(prop, "SupportedUriSchemes") == 0 || strcmp(prop, "SupportedMimeTypes") == 0)
+    return g_variant_new_strv(nullptr, 0);
+  if (strcmp(prop, "Metadata") == 0) {
+    GVariantBuilder b;
+    g_variant_builder_init(&b, G_VARIANT_TYPE("a{sv}"));
+    g_variant_builder_add(&b, "{sv}", "mpris:trackid", g_variant_new_object_path("/com/noryxs/noryxs/call"));
+    g_variant_builder_add(&b, "{sv}", "xesam:title", g_variant_new_string(D->mpris_title.c_str()));
+    return g_variant_builder_end(&b);
+  }
+  bool yes = strcmp(prop, "CanRaise") == 0 || strcmp(prop, "CanPlay") == 0 || strcmp(prop, "CanPause") == 0 ||
+             strcmp(prop, "CanControl") == 0;
+  return g_variant_new_boolean(yes);
+}
+
+const GDBusInterfaceVTable kMprisVTable = {MprisMethod, MprisProperty, nullptr, {nullptr}};
+
+void MprisBusAcquired(GDBusConnection* conn, const gchar*, gpointer) {
+  for (int i = 0; D->mpris_info && D->mpris_info->interfaces[i]; ++i) {
+    g_dbus_connection_register_object(conn, "/org/mpris/MediaPlayer2", D->mpris_info->interfaces[i], &kMprisVTable,
+                                      nullptr, nullptr, nullptr);
+  }
+}
+
+void MprisSet(bool active, const std::string& title) {
+  D->mpris_title = title.empty() ? "Llamada" : title;
+  if (active && D->mpris_owner == 0) {
+    if (D->mpris_info == nullptr) D->mpris_info = g_dbus_node_info_new_for_xml(kMprisXml, nullptr);
+    D->mpris_owner = g_bus_own_name(G_BUS_TYPE_SESSION, "org.mpris.MediaPlayer2.noryxs", G_BUS_NAME_OWNER_FLAGS_NONE,
+                                    MprisBusAcquired, nullptr, nullptr, nullptr, nullptr);
+  } else if (!active && D->mpris_owner != 0) {
+    g_bus_unown_name(D->mpris_owner);
+    D->mpris_owner = 0;
+  }
+}
+
 void OnMethodCall(FlMethodChannel*, FlMethodCall* call, gpointer) {
   const gchar* m = fl_method_call_get_name(call);
   FlValue* a = fl_method_call_get_args(call);
@@ -486,6 +569,44 @@ void OnMethodCall(FlMethodChannel*, FlMethodCall* call, gpointer) {
     gtk_window_set_urgency_hint(D->window, TRUE);
   } else if (strcmp(m, "setLaunchAtLogin") == 0) {
     result = fl_value_new_bool(SetLaunchAtLogin(Bool(a, "enabled", true)));
+  } else if (strcmp(m, "pickFile") == 0 || strcmp(m, "saveFile") == 0) {
+    // Selector de ficheros nativo (CSV de habitaciones, configuración de puestos)
+    bool save = strcmp(m, "saveFile") == 0;
+    std::string title = Str(a, "title");
+    GtkWidget* dlg = gtk_file_chooser_dialog_new(title.c_str(), D->window,
+                                                 save ? GTK_FILE_CHOOSER_ACTION_SAVE : GTK_FILE_CHOOSER_ACTION_OPEN,
+                                                 "_Cancelar", GTK_RESPONSE_CANCEL, save ? "_Guardar" : "_Abrir",
+                                                 GTK_RESPONSE_ACCEPT, nullptr);
+    if (save) {
+      gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dlg), TRUE);
+      gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dlg), Str(a, "name").c_str());
+    }
+    if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
+      g_autofree gchar* path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlg));
+      if (path) result = fl_value_new_string(path);
+    }
+    gtk_widget_destroy(dlg);
+  } else if (strcmp(m, "setMediaSession") == 0) {
+    MprisSet(Bool(a, "active", false), Str(a, "title"));
+  } else if (strcmp(m, "urlHandlerReady") == 0) {
+    D->url_ready = true;
+    result = fl_value_new_list();
+    for (const auto& u : D->pending_urls) fl_value_append_take(result, fl_value_new_string(u.c_str()));
+    if (!D->pending_urls.empty()) nx_desktop_present();
+    D->pending_urls.clear();
+  } else if (strcmp(m, "setDefaultDialer") == 0) {
+    // xdg-mime: vale para GNOME, KDE, XFCE… (usa el .desktop instalado por el .deb)
+    bool ok = true;
+    for (const char* s : {"tel", "sip", "callto"}) {
+      g_autofree gchar* cmd = g_strdup_printf("xdg-mime default %s.desktop x-scheme-handler/%s", APPLICATION_ID, s);
+      gint status = 1;
+      if (!g_spawn_command_line_sync(cmd, nullptr, nullptr, &status, nullptr) || status != 0) ok = false;
+    }
+    result = fl_value_new_bool(ok);
+  } else if (strcmp(m, "isDefaultDialer") == 0) {
+    g_autofree gchar* out = nullptr;
+    g_spawn_command_line_sync("xdg-mime query default x-scheme-handler/tel", &out, nullptr, nullptr, nullptr);
+    result = fl_value_new_bool(out != nullptr && g_str_has_prefix(g_strstrip(out), APPLICATION_ID));
   } else if (strcmp(m, "getLaunchAtLogin") == 0) {
     result = fl_value_new_bool(g_file_test(AutostartPath().c_str(), G_FILE_TEST_EXISTS));
   }
@@ -621,4 +742,16 @@ void nx_desktop_present(void) {
   gtk_widget_show(GTK_WIDGET(D->window));
   gtk_window_deiconify(D->window);
   gtk_window_present(D->window);
+}
+
+void nx_desktop_open_url(const char* uri) {
+  if (D == nullptr || uri == nullptr) return;
+  if (!D->url_ready) {
+    D->pending_urls.push_back(uri);
+    return;
+  }
+  g_autoptr(FlValue) args = fl_value_new_map();
+  fl_value_set_string_take(args, "url", fl_value_new_string(uri));
+  Invoke("openUrl", args);
+  nx_desktop_present();
 }
