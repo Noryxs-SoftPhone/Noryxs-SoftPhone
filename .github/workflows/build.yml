@@ -210,12 +210,10 @@ jobs:
   # Al integrar en main: publica una Release con los tres paquetes de escritorio.
   release:
     name: Release
-    # Se publica aunque falte macOS (los Mac de GitHub a veces no están disponibles):
-    # basta con que Linux y Windows hayan compilado; macOS se añade si también lo ha hecho.
-    if: >-
-      always() && github.ref == 'refs/heads/main' &&
-      needs.linux.result == 'success' && needs.windows.result == 'success'
-    needs: [macos, windows, linux]
+    # Solo depende de Linux y Windows: los Mac de GitHub a veces tardan mucho en estar
+    # disponibles. El .zip de macOS lo añade después el job "release-macos".
+    if: github.ref == 'refs/heads/main'
+    needs: [windows, linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -226,7 +224,7 @@ jobs:
         id: ver
         run: |
           v=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)
-          echo "tag=v$v-build.${{ github.run_number }}.${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+          echo "tag=v$v-build.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "name=NORYXS Virtual SIP Terminal $v (build ${{ github.run_number }})" >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
@@ -239,11 +237,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -la dist
+          gh release view "${{ steps.ver.outputs.tag }}" >/dev/null 2>&1 && \
+            { gh release upload "${{ steps.ver.outputs.tag }}" dist/* --clobber; exit 0; }
           gh release create "${{ steps.ver.outputs.tag }}" dist/* \
             --target "${{ github.sha }}" \
             --title "${{ steps.ver.outputs.name }}" \
             --notes "Paquetes de escritorio compilados desde ${GITHUB_SHA::7}:
 
           - **Linux**: \`.deb\` (Ubuntu/Debian) → \`sudo apt install ./NORYXS-Terminal_*.deb\`
-          - **macOS** (Apple Silicon): \`.zip\` con *NORYXS Terminal.app* (si no aparece, esa compilación no tuvo Mac disponible)
+          - **macOS** (Apple Silicon): \`.zip\` con *NORYXS Terminal.app* (se añade en cuanto termina la compilación de macOS)
           - **Windows** (x64): \`.zip\` con \`noryxs_terminal.exe\`"
+
+  # Añade el .zip de macOS a la Release cuando el Mac termina (puede ser bastante después).
+  release-macos:
+    name: Release (macOS)
+    if: github.ref == 'refs/heads/main'
+    needs: [macos, release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: NORYXS-Terminal-macOS
+          path: dist
+      - name: Subir macOS a la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(sed -n 's/^version: *//p' app/pubspec.yaml | head -1 | cut -d+ -f1)
+          gh release upload "v$v-build.${{ github.run_number }}" dist/* --clobber
