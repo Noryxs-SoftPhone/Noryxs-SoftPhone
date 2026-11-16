@@ -1,0 +1,1977 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NORYXS VIRTUAL SIP TERMINAL</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            noryxs: {
+              bg: '#FFFFFF',
+              surface: '#F9FAFB',
+              surfaceHover: '#F3F4F6',
+              border: '#E5E7EB',
+              charcoal: '#18181B',
+              muted: '#71717A',
+              gold: '#C5A059',
+              goldLight: '#FAF5EB',
+              goldDark: '#9A7B3E',
+            }
+          },
+          boxShadow: {
+            'terminal': '0 25px 60px -15px rgba(24, 24, 27, 0.14), 0 0 1px 1px rgba(24, 24, 27, 0.06)',
+            'keypad': '0 2px 4px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.9)',
+            'gold-glow': '0 0 0 3px rgba(197, 160, 89, 0.18)',
+            'os-toast': '0 20px 45px -10px rgba(0, 0, 0, 0.25), 0 0 1px 1px rgba(197, 160, 89, 0.45)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background: radial-gradient(circle at 50% 0%, #F4F5F7 0%, #E6E8EC 100%);
+      color: #18181B;
+      -webkit-font-smoothing: antialiased;
+    }
+    .desktop-wallpaper {
+      background:
+        radial-gradient(circle at 18% 22%, rgba(197, 160, 89, 0.14) 0%, transparent 45%),
+        radial-gradient(circle at 82% 78%, rgba(24, 24, 27, 0.08) 0%, transparent 50%),
+        linear-gradient(135deg, #ECEEF2 0%, #DFE3E8 100%);
+    }
+    .tactile-btn:active {
+      transform: translateY(1px) scale(0.985);
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.92); opacity: 0.9; }
+      70% { transform: scale(1.45); opacity: 0; }
+      100% { transform: scale(1.45); opacity: 0; }
+    }
+    .led-pulse::before {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 9999px;
+      background-color: #C5A059;
+      animation: pulse-ring 1.4s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+    }
+    @keyframes slide-in-right {
+      0% { opacity: 0; transform: translateX(36px) scale(0.96); }
+      100% { opacity: 1; transform: translateX(0) scale(1); }
+    }
+    .animate-os-banner {
+      animation: slide-in-right 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes ring-shake {
+      0%, 100% { transform: rotate(0deg); }
+      15% { transform: rotate(12deg); }
+      30% { transform: rotate(-10deg); }
+      45% { transform: rotate(8deg); }
+      60% { transform: rotate(-6deg); }
+      75% { transform: rotate(3deg); }
+    }
+    .animate-bell {
+      animation: ring-shake 1.2s ease-in-out infinite;
+    }
+    /* Custom subtle scrollbars */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #D4D4D8; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #A1A1AA; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between py-4 px-3 sm:px-6 select-none">
+
+  <!-- SIMULATION & ARCHITECTURE SANDBOX TOOLBAR (TOP) -->
+  <div class="w-full max-w-5xl mb-3 bg-white/85 backdrop-blur-md border border-gray-200/90 rounded-2xl px-4 py-2.5 shadow-sm flex flex-wrap items-center justify-between gap-2 text-xs">
+    <div class="flex items-center gap-2.5">
+      <span class="inline-flex items-center gap-1.5 font-semibold text-noryxs-charcoal">
+        <span class="w-2 h-2 rounded-full bg-noryxs-gold"></span>
+        Simulador PJSIP & FreePBX
+      </span>
+      <span class="hidden sm:inline text-gray-300">|</span>
+      <!-- Context Switcher: Open Terminal vs Desktop Background Notification -->
+      <div class="inline-flex rounded-xl bg-gray-100 p-0.5 border border-gray-200/80">
+        <button onclick="setWorkspaceMode('terminal')" id="modeTerminalBtn" class="px-2.5 py-1 rounded-lg font-semibold text-[11px] bg-white text-noryxs-charcoal shadow-sm transition">
+          Terminal Abierto
+        </button>
+        <button onclick="setWorkspaceMode('desktop')" id="modeDesktopBtn" class="px-2.5 py-1 rounded-lg font-semibold text-[11px] text-gray-600 hover:text-noryxs-charcoal transition flex items-center gap-1.5">
+          <span>Notificación Escritorio (Minimizado)</span>
+          <span class="w-1.5 h-1.5 rounded-full bg-noryxs-gold"></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5">
+      <button onclick="simulateIncomingCall(1, 'Laura Gómez', '+34 612 849 310')" class="px-2.5 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-goldLight text-noryxs-charcoal border border-noryxs-border hover:border-noryxs-gold font-medium transition flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        Entrante Línea 1
+      </button>
+      <button onclick="simulateIncomingCall(2, 'Carlos Mendoza', '+34 910 442 890')" class="px-2.5 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-goldLight text-noryxs-charcoal border border-noryxs-border hover:border-noryxs-gold font-medium transition flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-noryxs-gold"></span>
+        2ª Llamada Línea 2
+      </button>
+      <button onclick="toggleNetworkDrop()" id="btnNetSim" class="px-2.5 py-1.5 rounded-xl bg-noryxs-surface hover:bg-red-50 text-gray-600 hover:text-red-700 border border-noryxs-border font-medium transition">
+        Simular Caída SIP
+      </button>
+    </div>
+  </div>
+
+  <!-- DESKTOP ENVIRONMENT VIEW (Shows Native OS Floating Incoming Call Notification when App is Minimized) -->
+  <div id="desktopEnvironment" class="hidden w-full max-w-5xl flex-1 desktop-wallpaper rounded-[28px] border border-gray-300/80 shadow-inner relative overflow-hidden min-h-[680px] flex flex-col justify-between p-6">
+    <!-- Simulated OS Top Menu Bar -->
+    <div class="flex items-center justify-between px-4 py-2 rounded-2xl bg-white/75 backdrop-blur-md border border-white/80 text-xs text-gray-700 shadow-sm">
+      <div class="flex items-center gap-4">
+        <span class="font-bold tracking-tight text-noryxs-charcoal">NORYXS Desktop Agent</span>
+        <span class="text-gray-400">•</span>
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          PJSIP Daemon Activo en Bandeja (Ext. 201 / Ext. 202)
+        </span>
+      </div>
+      <div class="flex items-center gap-3 font-mono text-[11px] text-gray-500">
+        <span>TLS 1.3 • SRTP</span>
+        <button onclick="setWorkspaceMode('terminal')" class="px-2.5 py-1 rounded-lg bg-noryxs-charcoal text-white font-sans font-semibold text-[11px] hover:bg-black transition">
+          Restaurar Terminal
+        </button>
+      </div>
+    </div>
+
+    <!-- Center Hint -->
+    <div class="my-auto text-center max-w-md mx-auto space-y-2 pointer-events-none">
+      <div class="w-12 h-12 rounded-2xl bg-white/90 border border-gray-200/80 shadow-sm mx-auto flex items-center justify-center text-noryxs-goldDark font-bold text-lg">
+        N
+      </div>
+      <p class="text-sm font-semibold text-gray-700">Terminal minimizado en segundo plano</p>
+      <p class="text-xs text-gray-500 leading-relaxed">
+        Cuando entra una llamada SIP con la ventana minimizada o oculta, el motor nativo lanza una notificación flotante sobre el escritorio del sistema operativo (macOS / Windows / Linux).
+      </p>
+    </div>
+
+    <!-- NATIVE OS FLOATING NOTIFICATION BANNER (Top Right) -->
+    <div id="osFloatingNotification" class="absolute top-20 right-6 w-full max-w-[390px] bg-white/95 backdrop-blur-xl rounded-[24px] shadow-os-toast border border-noryxs-gold/60 p-4 animate-os-banner z-30">
+      <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b border-gray-100">
+        <div class="flex items-center gap-2">
+          <div class="w-6 h-6 rounded-lg bg-noryxs-charcoal flex items-center justify-center">
+            <svg class="w-3.5 h-3.5 text-noryxs-gold animate-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <div>
+            <span class="text-[11px] font-bold tracking-tight text-noryxs-charcoal uppercase">NORYXS SIP</span>
+            <span class="text-[10px] text-gray-400 ml-1">• Llamada entrante</span>
+          </div>
+        </div>
+        <span id="osNotifLineBadge" class="px-2 py-0.5 rounded-full bg-noryxs-goldLight border border-noryxs-gold/40 text-[10px] font-mono font-bold text-noryxs-goldDark">
+          LÍNEA 2 • EXT. 202
+        </span>
+      </div>
+
+      <div class="flex items-center gap-3.5 mb-3.5">
+        <div class="w-12 h-12 rounded-2xl bg-noryxs-surface border border-noryxs-border flex items-center justify-center shrink-0 relative">
+          <span class="font-bold text-base text-noryxs-charcoal" id="osNotifInitials">CM</span>
+          <span class="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-noryxs-gold border-2 border-white"></span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <p id="osNotifCallerName" class="text-base font-bold text-noryxs-charcoal truncate">Carlos Mendoza</p>
+          <p id="osNotifCallerNumber" class="font-mono text-xs text-gray-500 mt-0.5">+34 910 442 890</p>
+          <p id="osNotifContextNote" class="text-[11px] text-noryxs-goldDark font-medium mt-1">
+            Destino: Extensión 202 (PBX Principal)
+          </p>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="grid grid-cols-12 gap-2">
+        <button onclick="answerFromOsBanner()" class="col-span-6 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm tactile-btn">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <span>Contestar</span>
+        </button>
+        <button onclick="muteRinger()" id="osMuteRingBtn" class="col-span-3 py-2.5 px-2 rounded-xl bg-noryxs-surface hover:bg-gray-200/80 border border-noryxs-border text-gray-700 font-semibold text-[11px] flex items-center justify-center gap-1 tactile-btn" title="Silenciar timbre">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+          <span>Silenciar</span>
+        </button>
+        <button onclick="rejectFromOsBanner()" class="col-span-3 py-2.5 px-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-semibold text-[11px] flex items-center justify-center gap-1 tactile-btn">
+          <span>Rechazar</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Simulated OS Dock -->
+    <div class="mx-auto px-4 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-white shadow-sm flex items-center gap-3">
+      <button onclick="setWorkspaceMode('terminal')" class="relative group flex flex-col items-center">
+        <div class="w-10 h-10 rounded-xl bg-noryxs-charcoal text-white flex items-center justify-center font-bold text-sm shadow-sm group-hover:scale-105 transition">
+          N
+        </div>
+        <span class="w-1.5 h-1.5 rounded-full bg-noryxs-gold mt-1"></span>
+      </button>
+      <div class="h-6 w-[1px] bg-gray-300/70"></div>
+      <span class="text-[11px] text-gray-500">Haz clic en el icono de <strong>NORYXS</strong> o en <strong>Contestar</strong> para abrir el terminal</span>
+    </div>
+  </div>
+
+  <!-- MAIN DESKTOP IP PHONE CHASSIS -->
+  <main id="terminalChassis" class="w-full max-w-[465px] bg-noryxs-bg rounded-[30px] shadow-terminal border border-noryxs-border/90 overflow-hidden flex flex-col transition-all duration-300 relative">
+
+    <!-- INTEGRATED IN-TERMINAL INCOMING CALL DRAWER (Appears at top of phone LCD when a call arrives while app is open) -->
+    <div id="inTerminalRingingDrawer" class="hidden bg-noryxs-charcoal text-white px-5 py-3.5 border-b border-noryxs-gold/50 transition-all">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-noryxs-gold opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-noryxs-gold"></span>
+          </span>
+          <span id="inTermRingingBadge" class="text-[11px] font-bold tracking-wide uppercase text-noryxs-gold">
+            LLAMADA ENTRANTE • LÍNEA 2 (EXT. 202)
+          </span>
+        </div>
+        <span class="font-mono text-[10px] text-gray-400">SIP INVITE</span>
+      </div>
+
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <div class="min-w-0">
+          <p id="inTermCallerName" class="text-base font-bold text-white truncate">Carlos Mendoza</p>
+          <p id="inTermCallerNumber" class="font-mono text-xs text-gray-300">+34 910 442 890</p>
+        </div>
+        <div id="inTermHoldHint" class="hidden text-right shrink-0 px-2.5 py-1 rounded-xl bg-white/10 border border-white/10">
+          <span class="block text-[10px] text-noryxs-gold font-semibold">Multi-línea activa</span>
+          <span class="block text-[10px] text-gray-300">Retendrá Línea 1</span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-12 gap-2">
+        <button id="inTermAnswerBtn" onclick="answerRingingCall()" class="col-span-6 py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm tactile-btn">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <span>Contestar</span>
+        </button>
+        <button id="inTermMuteBtn" onclick="muteRinger()" class="col-span-3 py-2 px-2 rounded-xl bg-white/10 hover:bg-white/20 text-gray-200 font-medium text-[11px] flex items-center justify-center gap-1 tactile-btn">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M11 5L6 9H2v6h4l5 4V5z"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+          </svg>
+          <span>Silenciar</span>
+        </button>
+        <button id="inTermRejectBtn" onclick="rejectRingingCall()" class="col-span-3 py-2 px-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-400/30 text-red-200 font-semibold text-[11px] flex items-center justify-center tactile-btn">
+          <span>Rechazar</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- TOP HARDWARE BEZEL: BRANDING, DND, FORWARD, VOICEMAIL MWI & AUDIO DEVICES -->
+    <header class="px-5 pt-4 pb-3 border-b border-noryxs-border/80 flex items-center justify-between bg-white">
+      <div class="flex items-center gap-2.5">
+        <!-- Minimalist NORYXS Emblem -->
+        <div class="w-8 h-8 rounded-xl bg-noryxs-charcoal flex items-center justify-center shadow-sm relative">
+          <svg class="w-4 h-4 text-noryxs-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 19V5l14 14V5"/>
+          </svg>
+          <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-noryxs-gold border border-white"></span>
+        </div>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span class="font-bold tracking-tight text-sm text-noryxs-charcoal">NORYXS</span>
+            <span class="text-[9px] font-semibold tracking-widest uppercase px-1.5 py-0.5 rounded bg-noryxs-goldLight text-noryxs-goldDark border border-noryxs-gold/30">SIP</span>
+          </div>
+          <p class="text-[10px] text-noryxs-muted font-medium">Virtual IP Terminal • PJSIP</p>
+        </div>
+      </div>
+
+      <!-- Global Controls: DND, Forward, Voicemail MWI, Audio Devices -->
+      <div class="flex items-center gap-1">
+        <!-- DND (Do Not Disturb - SIP 486) -->
+        <button onclick="toggleDnd()" id="dndToggleBtn" title="No Molestar (DND - SIP 486)" class="px-2 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 text-[11px] font-semibold transition border border-noryxs-border/80 flex items-center gap-1">
+          <span id="dndDot" class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>
+          <span>DND</span>
+        </button>
+
+        <!-- Call Forwarding (SIP 302 / FreePBX *72) -->
+        <button onclick="toggleForwardDrawer()" id="fwdToggleBtn" title="Desvío de Llamadas (Call Forward)" class="px-2 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 text-[11px] font-semibold transition border border-noryxs-border/80 flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>
+          </svg>
+          <span id="fwdHeaderLabel">Desvío</span>
+        </button>
+
+        <!-- Voicemail MWI Quick Access Button -->
+        <button onclick="switchTab('voicemail')" id="mwiHeaderBtn" title="Buzón de Voz (MWI)" class="relative p-2 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 transition border border-noryxs-border/60">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="5.5" cy="11.5" r="4.5"/><circle cx="18.5" cy="11.5" r="4.5"/><line x1="5.5" y1="16" x2="18.5" y2="16"/>
+          </svg>
+          <span id="mwiHeaderBadge" class="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-noryxs-gold text-white font-mono text-[9px] font-bold flex items-center justify-center shadow-sm">
+            2
+          </span>
+        </button>
+
+        <!-- Audio Device Quick Selector -->
+        <button onclick="toggleAudioDrawer()" title="Dispositivos de Audio y Volumen" class="p-2 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 transition border border-noryxs-border/60">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
+            <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- CALL FORWARDING DRAWER (Collapsible) -->
+    <div id="forwardDrawer" class="hidden bg-noryxs-surface border-b border-noryxs-border px-5 py-3 text-xs space-y-2.5">
+      <div class="flex items-center justify-between">
+        <span class="font-semibold text-noryxs-charcoal">Desvío de Llamadas (SIP 302 / FreePBX)</span>
+        <button onclick="toggleForwardDrawer()" class="text-gray-400 hover:text-gray-700 font-medium">Cerrar</button>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="block text-[10px] font-medium text-gray-500 mb-1">Modo de Desvío</label>
+          <select id="fwdModeSelect" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-noryxs-gold">
+            <option value="OFF">Desactivado</option>
+            <option value="ALWAYS">Siempre (Incondicional *72)</option>
+            <option value="BUSY">Si está ocupado (*90)</option>
+            <option value="NOANSWER">Si no contesta (*52)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] font-medium text-gray-500 mb-1">Destino (Ext. o Móvil)</label>
+          <input id="fwdTargetInput" type="text" placeholder="Ej. 205 o +34 600..." class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 font-mono text-xs text-gray-800 focus:outline-none focus:border-noryxs-gold" />
+        </div>
+      </div>
+      <div class="flex items-center justify-between pt-0.5">
+        <span class="text-[10px] text-gray-400">Aplica sobre la línea seleccionada actualmente</span>
+        <button onclick="applyCallForwarding()" class="px-3 py-1.5 rounded-xl bg-noryxs-charcoal hover:bg-black text-white font-semibold text-[11px] tactile-btn">
+          Aplicar Desvío
+        </button>
+      </div>
+    </div>
+
+    <!-- AUDIO QUICK DRAWER (Collapsible) -->
+    <div id="audioDrawer" class="hidden bg-noryxs-surface border-b border-noryxs-border px-5 py-3 text-xs space-y-2.5">
+      <div class="flex items-center justify-between">
+        <span class="font-semibold text-noryxs-charcoal">Dispositivos de Audio (CoreAudio / WASAPI / ALSA)</span>
+        <button onclick="toggleAudioDrawer()" class="text-gray-400 hover:text-gray-700 font-medium">Cerrar</button>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="block text-[10px] font-medium text-gray-500 mb-1">Micrófono</label>
+          <select class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-noryxs-gold">
+            <option>Jabra Engage 65 USB</option>
+            <option>Micrófono MacBook Pro</option>
+            <option>AirPods Pro (Hands-Free)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[10px] font-medium text-gray-500 mb-1">Altavoz / Auricular</label>
+          <select class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-noryxs-gold">
+            <option>Jabra Engage 65 USB</option>
+            <option>Altavoces del Sistema</option>
+            <option>Poly Blackwire 8225</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex items-center justify-between pt-1">
+        <div class="flex items-center gap-2 flex-1 mr-4">
+          <span class="text-[10px] text-gray-500">Volumen</span>
+          <input type="range" min="0" max="100" value="82" class="w-full accent-noryxs-charcoal h-1.5 bg-gray-200 rounded-lg cursor-pointer">
+        </div>
+        <span class="text-[10px] px-2 py-0.5 rounded bg-white border border-noryxs-border text-gray-600 font-mono">AEC + NS ON</span>
+      </div>
+    </div>
+
+    <!-- VIEW 1: MAIN PHONE TERMINAL -->
+    <section id="view-terminal" class="flex-1 flex flex-col px-5 py-3.5 space-y-3">
+
+      <!-- 1. MULTI-LINE SIP SELECTOR CARDS (Minimum 2 Simultaneous Lines, Scalable to 4/6/8) -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Líneas SIP Simultáneas</span>
+          <div class="flex items-center gap-2">
+            <span id="globalRegStatus" class="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              TLS/SRTP
+            </span>
+            <button onclick="toggleExtraLines()" id="btnExpandLines" class="text-[11px] font-medium text-noryxs-goldDark hover:underline">
+              + Ver 4 líneas
+            </button>
+          </div>
+        </div>
+
+        <div id="linesContainer" class="grid grid-cols-2 gap-2.5">
+          <!-- Rendered dynamically via JS -->
+        </div>
+      </div>
+
+      <!-- 1B. BLF (BUSY LAMP FIELD), CALL PARK ORBITS & VOICEMAIL DSS KEYS -->
+      <div class="bg-noryxs-surface/60 rounded-2xl p-2 border border-noryxs-border/80">
+        <div class="flex items-center justify-between px-1 mb-1.5">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Teclas Rápidas BLF & Órbitas Park</span>
+          <button onclick="dialVoicemailBox()" class="text-[10px] font-bold text-noryxs-goldDark hover:underline flex items-center gap-1">
+            <span>Buzón (*97)</span>
+          </button>
+        </div>
+        <div id="blfKeysContainer" class="grid grid-cols-3 gap-1.5">
+          <!-- Rendered dynamically via JS -->
+        </div>
+      </div>
+
+      <!-- 2. PRIMARY LCD TELEPHONY DISPLAY (Shows Focused Line Session & Call Controls) -->
+      <div id="lcdDisplay" class="rounded-2xl bg-noryxs-surface border border-noryxs-border p-3.5 transition-all relative overflow-hidden">
+        <!-- Dynamic LCD Content -->
+        <div id="lcdContent"></div>
+
+        <!-- Real-Time RTP / MOS Quality Metrics Popover (Toggleable during active call) -->
+        <div id="rtpStatsDrawer" class="hidden mt-2.5 p-2.5 rounded-xl bg-white border border-noryxs-gold/40 text-[11px] space-y-1.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-noryxs-charcoal">Telemetría Media RTP (pjsua_call_get_stream_stat)</span>
+            <span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-mono font-bold text-[10px]">MOS 4.4 / 5.0</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 pt-1 border-t border-gray-100 font-mono text-center">
+            <div class="bg-noryxs-surface rounded-lg py-1">
+              <span class="block text-[9px] font-sans text-gray-400">JITTER</span>
+              <span id="statJitter" class="font-bold text-gray-800">3.2 ms</span>
+            </div>
+            <div class="bg-noryxs-surface rounded-lg py-1">
+              <span class="block text-[9px] font-sans text-gray-400">PACKET LOSS</span>
+              <span id="statLoss" class="font-bold text-emerald-700">0.0%</span>
+            </div>
+            <div class="bg-noryxs-surface rounded-lg py-1">
+              <span class="block text-[9px] font-sans text-gray-400">LATENCIA RTT</span>
+              <span id="statRtt" class="font-bold text-gray-800">18 ms</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Call Controls (Adaptive to Call State) -->
+        <div id="activeCallControls" class="hidden mt-3 pt-3 border-t border-noryxs-border/80 grid grid-cols-3 gap-2">
+          <!-- Populated dynamically when a call is active/held/ringing -->
+        </div>
+
+        <!-- Transfer Sub-Panel (Blind & Attended Transfer) -->
+        <div id="transferPanel" class="hidden mt-3 pt-3 border-t border-noryxs-border space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-noryxs-charcoal">Transferencia SIP (REFER)</span>
+            <button onclick="closeTransferPanel()" class="text-[11px] text-gray-400 hover:text-gray-700">Cancelar</button>
+          </div>
+          <input id="transferTargetInput" type="text" placeholder="Extensión o número destino (ej. 205)" class="w-full bg-white border border-noryxs-border rounded-xl px-3 py-2 font-mono text-xs focus:outline-none focus:border-noryxs-gold" />
+          <div id="transferActionButtons" class="grid grid-cols-2 gap-2">
+            <button onclick="executeBlindTransfer()" class="py-2 px-3 rounded-xl bg-white hover:bg-gray-100 border border-noryxs-border text-xs font-semibold text-noryxs-charcoal transition">
+              Transferencia Ciega
+            </button>
+            <button onclick="startAttendedTransfer()" class="py-2 px-3 rounded-xl bg-noryxs-charcoal hover:bg-black text-white text-xs font-semibold transition">
+              Atendida (Consultar)
+            </button>
+          </div>
+          <!-- Attended Transfer Consultation State -->
+          <div id="attendedConsultBox" class="hidden bg-noryxs-goldLight border border-noryxs-gold/40 rounded-xl p-2.5 space-y-2">
+            <p class="text-[11px] text-noryxs-goldDark font-medium">
+              Interlocutor original en espera. Hablando con <span id="consultTargetLabel" class="font-mono font-bold">205</span>.
+            </p>
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="completeAttendedTransfer()" class="py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold">
+                Completar Transferencia
+              </button>
+              <button onclick="cancelAttendedTransfer()" class="py-1.5 px-2.5 rounded-lg bg-white border border-gray-300 text-gray-700 text-[11px] font-semibold">
+                Cancelar y Recuperar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. DIALER INPUT & OUTBOUND LINE SELECTOR -->
+      <div class="space-y-2">
+        <div class="relative flex items-center bg-noryxs-surface border border-noryxs-border focus-within:border-noryxs-gold focus-within:shadow-gold-glow rounded-2xl px-3.5 py-2 transition">
+          <input id="dialInput" type="text" placeholder="Introduce número o extensión..." class="w-full bg-transparent font-mono text-lg font-semibold text-noryxs-charcoal placeholder-gray-400 focus:outline-none tracking-tight" />
+          <button onclick="backspaceDial()" title="Borrar dígito" class="p-1.5 text-gray-400 hover:text-noryxs-charcoal rounded-lg transition">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Outbound Line Indicator Pill -->
+        <div class="flex items-center justify-between px-1 text-[11px]">
+          <span class="text-gray-500">Salida por:</span>
+          <div class="flex items-center gap-1.5">
+            <button onclick="selectOutboundLine(1)" id="outLinePill1" class="px-2.5 py-0.5 rounded-full font-medium transition border">
+              Línea 1 • Ext. 201
+            </button>
+            <button onclick="selectOutboundLine(2)" id="outLinePill2" class="px-2.5 py-0.5 rounded-full font-medium transition border">
+              Línea 2 • Ext. 202
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. TACTILE IP PHONE KEYPAD -->
+      <div class="grid grid-cols-3 gap-2 pt-0.5">
+        <button onclick="pressKey('1')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">1</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">VOICEMAIL</span>
+        </button>
+        <button onclick="pressKey('2')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">2</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">ABC</span>
+        </button>
+        <button onclick="pressKey('3')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">3</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">DEF</span>
+        </button>
+        <button onclick="pressKey('4')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">4</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">GHI</span>
+        </button>
+        <button onclick="pressKey('5')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">5</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">JKL</span>
+        </button>
+        <button onclick="pressKey('6')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">6</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">MNO</span>
+        </button>
+        <button onclick="pressKey('7')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">7</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">PQRS</span>
+        </button>
+        <button onclick="pressKey('8')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">8</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">TUV</span>
+        </button>
+        <button onclick="pressKey('9')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">9</span>
+          <span class="text-[8px] tracking-widest text-gray-400 mt-0.5">WXYZ</span>
+        </button>
+        <button onclick="pressKey('*')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">*</span>
+        </button>
+        <button onclick="pressKey('0')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">0</span>
+          <span class="text-[9px] text-gray-400 leading-none mt-0.5">+</span>
+        </button>
+        <button onclick="pressKey('#')" class="tactile-btn h-11 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border/80 shadow-keypad flex flex-col items-center justify-center transition">
+          <span class="font-mono text-base font-bold text-noryxs-charcoal leading-none">#</span>
+        </button>
+      </div>
+
+      <!-- 5. PRIMARY CALL / ACTION BAR -->
+      <div class="grid grid-cols-12 gap-2.5 pt-0.5">
+        <button onclick="clearDial()" class="col-span-3 h-11 rounded-2xl bg-noryxs-surface hover:bg-gray-200/70 border border-noryxs-border text-xs font-semibold text-gray-600 transition tactile-btn">
+          Limpiar
+        </button>
+        <button onclick="initiateOutboundCall()" class="col-span-9 h-11 rounded-2xl bg-noryxs-charcoal hover:bg-black text-white font-semibold text-sm flex items-center justify-center gap-2 shadow-md transition tactile-btn">
+          <svg class="w-4 h-4 text-noryxs-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+          </svg>
+          <span id="callButtonLabel">Llamar desde Línea 1</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- VIEW 2: CONTACTS DIRECTORY -->
+    <section id="view-contacts" class="hidden flex-1 flex flex-col px-5 py-4 space-y-3 overflow-y-auto max-h-[560px]">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-noryxs-charcoal">Agenda de Contactos</h2>
+        <span class="text-[11px] text-gray-400">Directorio Local</span>
+      </div>
+      <input id="contactSearch" oninput="renderContacts()" type="text" placeholder="Buscar por nombre, empresa o extensión..." class="w-full bg-noryxs-surface border border-noryxs-border rounded-xl px-3.5 py-2 text-xs focus:outline-none focus:border-noryxs-gold" />
+      <div id="contactsList" class="space-y-2 overflow-y-auto pr-1"></div>
+    </section>
+
+    <!-- VIEW 3: CALL HISTORY (CDR) -->
+    <section id="view-history" class="hidden flex-1 flex flex-col px-5 py-4 space-y-3 overflow-y-auto max-h-[560px]">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-noryxs-charcoal">Historial de Llamadas</h2>
+        <span class="text-[11px] text-gray-400">Registro Local SIP</span>
+      </div>
+      <div id="historyList" class="space-y-2 overflow-y-auto pr-1"></div>
+    </section>
+
+    <!-- VIEW 4: VOICEMAIL (MWI RFC 3842) -->
+    <section id="view-voicemail" class="hidden flex-1 flex flex-col px-5 py-4 space-y-3 overflow-y-auto max-h-[560px]">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-noryxs-charcoal">Buzón de Voz (MWI)</h2>
+          <p class="text-[11px] text-gray-500">Suscripción SIP RFC 3842 • FreePBX Voicemail</p>
+        </div>
+        <button onclick="dialVoicemailBox()" class="px-3 py-1.5 rounded-xl bg-noryxs-charcoal hover:bg-black text-white font-semibold text-xs flex items-center gap-1.5 tactile-btn">
+          <span class="w-2 h-2 rounded-full bg-noryxs-gold"></span>
+          <span>Llamar al Buzón (*97)</span>
+        </button>
+      </div>
+      <div id="voicemailList" class="space-y-2 overflow-y-auto pr-1"></div>
+    </section>
+
+    <!-- VIEW 5: SIP ACCOUNTS CONFIGURATION (FreePBX) -->
+    <section id="view-settings" class="hidden flex-1 flex flex-col px-5 py-4 space-y-3 overflow-y-auto max-h-[560px]">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-bold text-noryxs-charcoal">Configuración Cuentas SIP</h2>
+          <p class="text-[11px] text-gray-500">Credenciales almacenadas en Keychain / Credential Manager</p>
+        </div>
+        <select id="configLineSelect" onchange="loadSipConfigForm()" class="bg-noryxs-surface border border-noryxs-border rounded-xl px-2.5 py-1.5 text-xs font-semibold text-noryxs-charcoal">
+          <option value="1">Línea 1 (Ext. 201)</option>
+          <option value="2">Línea 2 (Ext. 202)</option>
+          <option value="3">Línea 3 (Ext. 203)</option>
+          <option value="4">Línea 4 (Ext. 204)</option>
+        </select>
+      </div>
+
+      <div class="bg-noryxs-surface border border-noryxs-border rounded-2xl p-3.5 space-y-2.5 text-xs">
+        <div class="flex items-center justify-between pb-2 border-b border-noryxs-border">
+          <span class="font-semibold text-gray-700">Estado de Registro PJSIP:</span>
+          <span id="cfgRegBadge" class="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+            Registrada (200 OK)
+          </span>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2.5">
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Nombre Identidad</label>
+            <input id="cfgName" type="text" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 text-xs" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Usuario / Extensión SIP</label>
+            <input id="cfgUser" type="text" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 font-mono text-xs" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Contraseña SIP (Cifrada)</label>
+            <input id="cfgPass" type="password" value="••••••••••••" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 font-mono text-xs" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Servidor FreePBX / Dominio</label>
+            <input id="cfgHost" type="text" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 font-mono text-xs" />
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Puerto & Transporte</label>
+            <div class="flex gap-1.5">
+              <input id="cfgPort" type="text" class="w-16 bg-white border border-noryxs-border rounded-xl px-2 py-1.5 font-mono text-xs" />
+              <select id="cfgTransport" class="flex-1 bg-white border border-noryxs-border rounded-xl px-2 py-1.5 font-mono text-xs">
+                <option value="TLS">TLS + SRTP</option>
+                <option value="TCP">TCP</option>
+                <option value="UDP">UDP</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[10px] font-medium text-gray-500 mb-1">Expiración Registro (seg)</label>
+            <input id="cfgExpiry" type="number" value="300" class="w-full bg-white border border-noryxs-border rounded-xl px-2.5 py-1.5 font-mono text-xs" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-[10px] font-medium text-gray-500 mb-1">Códecs Prioritarios</label>
+          <div class="flex flex-wrap gap-1.5">
+            <span class="px-2 py-0.5 rounded-lg bg-white border border-noryxs-gold text-noryxs-goldDark font-mono text-[10px] font-semibold">G.722 (HD)</span>
+            <span class="px-2 py-0.5 rounded-lg bg-white border border-noryxs-border text-gray-700 font-mono text-[10px]">Opus 48kHz</span>
+            <span class="px-2 py-0.5 rounded-lg bg-white border border-noryxs-border text-gray-700 font-mono text-[10px]">G.711 A-law</span>
+            <span class="px-2 py-0.5 rounded-lg bg-white border border-noryxs-border text-gray-700 font-mono text-[10px]">G.711 μ-law</span>
+          </div>
+        </div>
+
+        <div class="pt-1 flex gap-2">
+          <button onclick="testSipRegistration()" class="flex-1 py-2 rounded-xl bg-noryxs-charcoal hover:bg-black text-white font-semibold text-xs transition tactile-btn">
+            Guardar y Probar Registro SIP
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOTTOM NAVIGATION DOCK -->
+    <nav class="px-3 py-2 bg-noryxs-surface border-t border-noryxs-border grid grid-cols-5 gap-1">
+      <button onclick="switchTab('terminal')" id="tab-terminal" class="py-1.5 rounded-xl bg-white shadow-sm border border-noryxs-border/80 text-noryxs-charcoal font-semibold text-[11px] flex flex-col items-center justify-center gap-0.5 transition">
+        <svg class="w-4 h-4 text-noryxs-goldDark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="2" width="14" height="20" rx="3"/><line x1="12" y1="18" x2="12.01" y2="18"/>
+        </svg>
+        <span>Terminal</span>
+      </button>
+      <button onclick="switchTab('voicemail')" id="tab-voicemail" class="py-1.5 rounded-xl text-gray-500 hover:text-noryxs-charcoal font-medium text-[11px] flex flex-col items-center justify-center gap-0.5 transition relative">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="5.5" cy="11.5" r="4.5"/><circle cx="18.5" cy="11.5" r="4.5"/><line x1="5.5" y1="16" x2="18.5" y2="16"/>
+        </svg>
+        <span>Buzón</span>
+        <span id="tabMwiDot" class="absolute top-1.5 right-4 w-1.5 h-1.5 rounded-full bg-noryxs-gold"></span>
+      </button>
+      <button onclick="switchTab('contacts')" id="tab-contacts" class="py-1.5 rounded-xl text-gray-500 hover:text-noryxs-charcoal font-medium text-[11px] flex flex-col items-center justify-center gap-0.5 transition">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span>Contactos</span>
+      </button>
+      <button onclick="switchTab('history')" id="tab-history" class="py-1.5 rounded-xl text-gray-500 hover:text-noryxs-charcoal font-medium text-[11px] flex flex-col items-center justify-center gap-0.5 transition">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <span>Historial</span>
+      </button>
+      <button onclick="switchTab('settings')" id="tab-settings" class="py-1.5 rounded-xl text-gray-500 hover:text-noryxs-charcoal font-medium text-[11px] flex flex-col items-center justify-center gap-0.5 transition">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span>SIP</span>
+      </button>
+    </nav>
+
+    <!-- NON-INTRUSIVE SYSTEM EVENT TOAST -->
+    <div id="toastBanner" class="pointer-events-none opacity-0 transition-opacity duration-300 absolute bottom-16 left-4 right-4 bg-noryxs-charcoal text-white text-xs px-3.5 py-2.5 rounded-xl shadow-lg flex items-center justify-between z-20">
+      <span id="toastText">Evento PJSIP</span>
+      <span class="text-noryxs-gold font-mono text-[10px]">SIP/2.0</span>
+    </div>
+  </main>
+
+  <!-- FOOTER ARCHITECTURE NOTE -->
+  <footer class="mt-3 text-center text-[11px] text-gray-500">
+    NORYXS VIRTUAL SIP TERMINAL • Arquitectura Multi-Línea Escalable (macOS • Windows • Linux)
+  </footer>
+
+  <script>
+    // --- ARCHITECTURAL STATE (Mirrors SipAccountManager, MultiLineManager & CallSessionManager) ---
+    let workspaceMode = 'terminal'; // 'terminal' | 'desktop'
+    let showFourLines = false;
+    let selectedOutboundLineId = 1;
+    let focusedLineId = 1;
+    let isMuted = false;
+    let isRingerMuted = false;
+    let isDtmfMode = false;
+    let isDndEnabled = false;
+    let isRecordingCall = false;
+    let isConferenceActive = false;
+    let showRtpStats = false;
+    let forwardConfig = { mode: 'OFF', target: '' };
+    let isSimulatedDisconnected = false;
+    let activeRingingLineId = null;
+
+    const blfExtensions = [
+      { ext: '200', label: 'Recepción', status: 'IDLE', isParkOrbit: false, parkedCaller: '' },
+      { ext: '205', label: 'Soporte IT', status: 'RINGING', isParkOrbit: false, parkedCaller: '' },
+      { ext: '71', label: 'Órbita Park 71', status: 'IDLE', isParkOrbit: true, parkedCaller: '' }
+    ];
+
+    let voicemails = [
+      { id: 'vm-1', lineId: 1, ext: '201', caller: 'Laura Gómez', number: '+34 612 849 310', time: 'Hace 14 min', duration: '00:38', unread: true },
+      { id: 'vm-2', lineId: 1, ext: '201', caller: 'Dirección Operaciones', number: 'Ext. 200', time: 'Hoy, 10:12', duration: '01:12', unread: true },
+      { id: 'vm-3', lineId: 2, ext: '202', caller: 'Proveedor Logística', number: '+34 934 118 209', time: 'Ayer, 18:45', duration: '00:24', unread: false }
+    ];
+
+    const lines = [
+      {
+        id: 1,
+        name: 'LÍNEA 1',
+        identity: 'Puesto Principal',
+        extension: '201',
+        host: 'pbx.noryxs.local',
+        port: '5061',
+        transport: 'TLS',
+        regState: 'REGISTERED', // REGISTERED | REGISTERING | UNREGISTERED | ERROR
+        callState: 'IDLE',      // IDLE | RINGING | OUTBOUND | ACTIVE | HELD
+        remoteName: '',
+        remoteNumber: '',
+        durationSec: 0,
+        codec: 'G.722',
+        unreadVm: 2
+      },
+      {
+        id: 2,
+        name: 'LÍNEA 2',
+        identity: 'Atención Directa',
+        extension: '202',
+        host: 'pbx.noryxs.local',
+        port: '5061',
+        transport: 'TLS',
+        regState: 'REGISTERED',
+        callState: 'IDLE',
+        remoteName: '',
+        remoteNumber: '',
+        durationSec: 0,
+        codec: 'Opus',
+        unreadVm: 0
+      },
+      {
+        id: 3,
+        name: 'LÍNEA 3',
+        identity: 'Soporte Técnico',
+        extension: '203',
+        host: 'pbx.noryxs.local',
+        port: '5061',
+        transport: 'TLS',
+        regState: 'REGISTERED',
+        callState: 'IDLE',
+        remoteName: '',
+        remoteNumber: '',
+        durationSec: 0,
+        codec: 'G.722',
+        unreadVm: 0
+      },
+      {
+        id: 4,
+        name: 'LÍNEA 4',
+        identity: 'Despacho Dirección',
+        extension: '204',
+        host: 'pbx.noryxs.local',
+        port: '5061',
+        transport: 'TLS',
+        regState: 'UNREGISTERED',
+        callState: 'IDLE',
+        remoteName: '',
+        remoteNumber: '',
+        durationSec: 0,
+        codec: 'G.711a',
+        unreadVm: 0
+      }
+    ];
+
+    const contacts = [
+      { name: 'Laura Gómez', company: 'Dirección Operaciones', number: '+34 612 849 310', fav: true },
+      { name: 'Carlos Mendoza', company: 'Consultoría Externos', number: '+34 910 442 890', fav: true },
+      { name: 'Soporte Técnico NORYXS', company: 'Extensión Interna', number: '205', fav: true },
+      { name: 'Recepción Central', company: 'FreePBX Ring Group', number: '200', fav: false },
+      { name: 'Elena Navarro', company: 'Administración', number: '208', fav: false }
+    ];
+
+    const callHistory = [
+      { type: 'incoming', name: 'Laura Gómez', number: '+34 612 849 310', lineId: 1, time: 'Hoy, 11:42', duration: '04:18' },
+      { type: 'missed', name: 'Carlos Mendoza', number: '+34 910 442 890', lineId: 2, time: 'Hoy, 10:15', duration: '00:00' },
+      { type: 'outgoing', name: 'Soporte Técnico', number: '205', lineId: 1, time: 'Ayer, 17:30', duration: '02:05' }
+    ];
+
+    // --- WEB AUDIO SYNTHESIZER (Classic IP Phone Ringtone & DTMF Tones) ---
+    let audioCtx = null;
+    let ringtoneInterval = null;
+
+    function ensureAudioCtx() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) audioCtx = new AudioContext();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playDtmfTone(digit) {
+      try {
+        ensureAudioCtx();
+        if (!audioCtx) return;
+        const freqs = {
+          '1': [697, 1209], '2': [697, 1336], '3': [697, 1477],
+          '4': [770, 1209], '5': [770, 1336], '6': [770, 1477],
+          '7': [852, 1209], '8': [852, 1336], '9': [852, 1477],
+          '*': [941, 1209], '0': [941, 1336], '#': [941, 1477]
+        };
+        const pair = freqs[digit] || [440, 480];
+        const now = audioCtx.currentTime;
+        pair.forEach(f => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(f, now);
+          gain.gain.setValueAtTime(0.05, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now);
+          osc.stop(now + 0.15);
+        });
+      } catch (e) {}
+    }
+
+    function playSingleRingBurst() {
+      if (isRingerMuted) return;
+      try {
+        ensureAudioCtx();
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        [440, 480].forEach(freq => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.035, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now);
+          osc.stop(now + 0.46);
+        });
+      } catch (e) {}
+    }
+
+    function startRingtone() {
+      stopRingtone();
+      isRingerMuted = false;
+      playSingleRingBurst();
+      ringtoneInterval = setInterval(() => {
+        playSingleRingBurst();
+      }, 2200);
+    }
+
+    function stopRingtone() {
+      if (ringtoneInterval) {
+        clearInterval(ringtoneInterval);
+        ringtoneInterval = null;
+      }
+    }
+
+    function muteRinger() {
+      isRingerMuted = true;
+      stopRingtone();
+      showToast('Tono de llamada silenciado (llamada sigue entrante)');
+      updateRingingNotifications();
+    }
+
+    // --- WORKSPACE MODE SWITCHER (Open Terminal vs Minimized OS Notification) ---
+    function setWorkspaceMode(mode) {
+      workspaceMode = mode;
+      const termBtn = document.getElementById('modeTerminalBtn');
+      const deskBtn = document.getElementById('modeDesktopBtn');
+      const chassis = document.getElementById('terminalChassis');
+      const desktop = document.getElementById('desktopEnvironment');
+
+      if (mode === 'desktop') {
+        termBtn.className = 'px-2.5 py-1 rounded-lg font-semibold text-[11px] text-gray-600 hover:text-noryxs-charcoal transition';
+        deskBtn.className = 'px-2.5 py-1 rounded-lg font-semibold text-[11px] bg-white text-noryxs-charcoal shadow-sm transition flex items-center gap-1.5';
+        chassis.classList.add('hidden');
+        desktop.classList.remove('hidden');
+
+        // Ensure there is an active incoming call to preview the native OS floating banner
+        const ringingLine = lines.find(l => l.callState === 'RINGING');
+        if (!ringingLine) {
+          simulateIncomingCall(2, 'Carlos Mendoza', '+34 910 442 890');
+        } else {
+          updateRingingNotifications();
+        }
+      } else {
+        deskBtn.className = 'px-2.5 py-1 rounded-lg font-semibold text-[11px] text-gray-600 hover:text-noryxs-charcoal transition flex items-center gap-1.5';
+        termBtn.className = 'px-2.5 py-1 rounded-lg font-semibold text-[11px] bg-white text-noryxs-charcoal shadow-sm transition';
+        desktop.classList.add('hidden');
+        chassis.classList.remove('hidden');
+        updateRingingNotifications();
+      }
+    }
+
+    // --- TELEPHONY TIMER LOOP ---
+    setInterval(() => {
+      let updated = false;
+      lines.forEach(line => {
+        if (line.callState === 'ACTIVE' || line.callState === 'HELD') {
+          line.durationSec += 1;
+          updated = true;
+        }
+      });
+      if (updated) {
+        renderLines();
+        renderLcdAndControls();
+      }
+    }, 1000);
+
+    // --- UI NAVIGATION & DRAWERS ---
+    function switchTab(tabName) {
+      ['terminal', 'voicemail', 'contacts', 'history', 'settings'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        const btn = document.getElementById(`tab-${t}`);
+        btn.className = 'py-1.5 rounded-xl text-gray-500 hover:text-noryxs-charcoal font-medium text-[11px] flex flex-col items-center justify-center gap-0.5 transition relative';
+      });
+      document.getElementById(`view-${tabName}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tab-${tabName}`);
+      activeBtn.className = 'py-1.5 rounded-xl bg-white shadow-sm border border-noryxs-border/80 text-noryxs-charcoal font-semibold text-[11px] flex flex-col items-center justify-center gap-0.5 transition relative';
+
+      if (tabName === 'voicemail') renderVoicemails();
+      if (tabName === 'contacts') renderContacts();
+      if (tabName === 'history') renderHistory();
+      if (tabName === 'settings') loadSipConfigForm();
+    }
+
+    function toggleAudioDrawer() {
+      document.getElementById('forwardDrawer').classList.add('hidden');
+      document.getElementById('audioDrawer').classList.toggle('hidden');
+    }
+
+    function toggleForwardDrawer() {
+      document.getElementById('audioDrawer').classList.add('hidden');
+      document.getElementById('forwardDrawer').classList.toggle('hidden');
+    }
+
+    function toggleRtpStats() {
+      showRtpStats = !showRtpStats;
+      renderLcdAndControls();
+    }
+
+    function toggleExtraLines() {
+      showFourLines = !showFourLines;
+      document.getElementById('btnExpandLines').textContent = showFourLines ? '− Ver 2 líneas' : '+ Ver 4 líneas';
+      renderLines();
+    }
+
+    // --- DIALPAD & DTMF ---
+    function pressKey(digit) {
+      playDtmfTone(digit);
+      const focusedLine = lines.find(l => l.id === focusedLineId);
+      if (focusedLine && focusedLine.callState === 'ACTIVE' && isDtmfMode) {
+        showToast(`DTMF RFC 2833 enviado: [ ${digit} ] en ${focusedLine.name}`);
+        return;
+      }
+      const input = document.getElementById('dialInput');
+      input.value += digit;
+    }
+
+    function backspaceDial() {
+      const input = document.getElementById('dialInput');
+      input.value = input.value.slice(0, -1);
+    }
+
+    function clearDial() {
+      document.getElementById('dialInput').value = '';
+    }
+
+    function selectOutboundLine(lineId) {
+      selectedOutboundLineId = lineId;
+      const line = lines.find(l => l.id === lineId);
+      if (line && line.callState === 'IDLE') {
+        focusedLineId = lineId;
+      }
+      renderUI();
+    }
+
+    function focusLine(lineId) {
+      focusedLineId = lineId;
+      const line = lines.find(l => l.id === lineId);
+      if (line && line.callState === 'IDLE') {
+        selectedOutboundLineId = lineId;
+      }
+      renderUI();
+    }
+
+    // --- CALL SESSION MANAGER & STATE MACHINE ---
+    function initiateOutboundCall(overrideNumber = null, overrideName = null) {
+      const input = document.getElementById('dialInput');
+      const targetNumber = (overrideNumber || input.value).trim();
+      if (!targetNumber) {
+        showToast('Introduce un número o extensión para llamar');
+        return;
+      }
+
+      const line = lines.find(l => l.id === selectedOutboundLineId);
+      if (!line || line.regState !== 'REGISTERED') {
+        showToast(`Error: ${line ? line.name : 'Línea'} no está registrada en FreePBX`);
+        return;
+      }
+      if (line.callState !== 'IDLE') {
+        showToast(`${line.name} ya tiene una sesión en curso`);
+        return;
+      }
+
+      // Hold any other currently active call on another line
+      lines.forEach(other => {
+        if (other.id !== line.id && other.callState === 'ACTIVE') {
+          other.callState = 'HELD';
+          showToast(`${other.name} puesta en espera automáticamente`);
+        }
+      });
+
+      const knownContact = contacts.find(c => c.number === targetNumber);
+      line.callState = 'OUTBOUND';
+      line.remoteNumber = targetNumber;
+      line.remoteName = overrideName || (knownContact ? knownContact.name : 'Llamada Saliente');
+      line.durationSec = 0;
+      focusedLineId = line.id;
+      if (!overrideNumber) input.value = '';
+
+      switchTab('terminal');
+      renderUI();
+      showToast(`INVITE enviado por ${line.name} (Ext. ${line.extension})`);
+
+      // Simulate SIP 200 OK connection after 1.1s
+      setTimeout(() => {
+        if (line.callState === 'OUTBOUND') {
+          line.callState = 'ACTIVE';
+          addHistoryRecord('outgoing', line.remoteName, line.remoteNumber, line.id, '00:12');
+          renderUI();
+        }
+      }, 1100);
+    }
+
+    function simulateIncomingCall(lineId, callerName, callerNumber) {
+      if (forwardConfig.mode === 'ALWAYS' && forwardConfig.target) {
+        addHistoryRecord('missed', callerName, callerNumber, lineId, '00:00');
+        showToast(`SIP 302 Moved Temporarily: Desviada a ${forwardConfig.target}`);
+        return;
+      }
+      if (isDndEnabled) {
+        addHistoryRecord('missed', callerName, callerNumber, lineId, '00:00');
+        showToast(`DND Activo: Llamada de ${callerNumber} rechazada (SIP 486 -> Buzón)`);
+        return;
+      }
+      if (workspaceMode === 'terminal') {
+        switchTab('terminal');
+      }
+      const line = lines.find(l => l.id === lineId);
+      if (!line || line.regState !== 'REGISTERED') {
+        showToast(`Línea ${lineId} desconectada: no puede recibir INVITE`);
+        return;
+      }
+      if (line.callState !== 'IDLE') {
+        showToast(`Línea ${lineId} ocupada: simulando en otra línea libre`);
+        return;
+      }
+
+      line.callState = 'RINGING';
+      line.remoteName = callerName;
+      line.remoteNumber = callerNumber;
+      line.durationSec = 0;
+      activeRingingLineId = line.id;
+
+      // Keep focus on existing active call if user is talking, unless no call is active
+      const hasActiveCall = lines.some(l => l.callState === 'ACTIVE');
+      if (!hasActiveCall) {
+        focusedLineId = line.id;
+      }
+
+      startRingtone();
+      renderUI();
+      showToast(`Llamada entrante en ${line.name} (Ext. ${line.extension})`);
+    }
+
+    function answerRingingCall(lineId = activeRingingLineId) {
+      const line = lines.find(l => l.id === lineId) || lines.find(l => l.callState === 'RINGING');
+      if (!line) return;
+
+      stopRingtone();
+      activeRingingLineId = null;
+
+      // Put any existing ACTIVE call on another line into HELD automatically (never drop it)
+      lines.forEach(other => {
+        if (other.id !== line.id && other.callState === 'ACTIVE') {
+          other.callState = 'HELD';
+          showToast(`${other.name} retenida automáticamente (SIP Hold)`);
+        }
+      });
+
+      line.callState = 'ACTIVE';
+      focusedLineId = line.id;
+      addHistoryRecord('incoming', line.remoteName, line.remoteNumber, line.id, '01:05');
+      renderUI();
+    }
+
+    function rejectRingingCall(lineId = activeRingingLineId) {
+      const line = lines.find(l => l.id === lineId) || lines.find(l => l.callState === 'RINGING');
+      if (!line) return;
+
+      stopRingtone();
+      activeRingingLineId = null;
+      addHistoryRecord('missed', line.remoteName, line.remoteNumber, line.id, '00:00');
+      resetLineSession(line);
+      showToast(`Llamada rechazada en ${line.name} (SIP 486 Busy Here)`);
+      renderUI();
+    }
+
+    function answerFromOsBanner() {
+      answerRingingCall();
+      setWorkspaceMode('terminal');
+    }
+
+    function rejectFromOsBanner() {
+      rejectRingingCall();
+    }
+
+    function updateRingingNotifications() {
+      const ringingLine = lines.find(l => l.callState === 'RINGING');
+      const inTermDrawer = document.getElementById('inTerminalRingingDrawer');
+      const osBanner = document.getElementById('osFloatingNotification');
+
+      if (!ringingLine) {
+        inTermDrawer.classList.add('hidden');
+        osBanner.classList.add('hidden');
+        return;
+      }
+
+      const otherActive = lines.find(l => l.id !== ringingLine.id && l.callState === 'ACTIVE');
+
+      // Update In-Terminal Integrated Drawer
+      inTermDrawer.classList.remove('hidden');
+      document.getElementById('inTermRingingBadge').textContent = `LLAMADA ENTRANTE • ${ringingLine.name} (EXT. ${ringingLine.extension})`;
+      document.getElementById('inTermCallerName').textContent = ringingLine.remoteName;
+      document.getElementById('inTermCallerNumber').textContent = ringingLine.remoteNumber;
+      document.getElementById('inTermAnswerBtn').setAttribute('onclick', `answerRingingCall(${ringingLine.id})`);
+      document.getElementById('inTermMuteBtn').setAttribute('onclick', `muteRinger()`);
+      document.getElementById('inTermRejectBtn').setAttribute('onclick', `rejectRingingCall(${ringingLine.id})`);
+
+      const holdHint = document.getElementById('inTermHoldHint');
+      if (otherActive) {
+        holdHint.classList.remove('hidden');
+        holdHint.querySelector('span:last-child').textContent = `Retendrá ${otherActive.name}`;
+      } else {
+        holdHint.classList.add('hidden');
+      }
+
+      // Update Native OS Floating Notification Banner (for Desktop / Minimized Mode)
+      if (workspaceMode === 'desktop') {
+        osBanner.classList.remove('hidden');
+        const initials = ringingLine.remoteName.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+        document.getElementById('osNotifInitials').textContent = initials || 'SIP';
+        document.getElementById('osNotifLineBadge').textContent = `${ringingLine.name} • EXT. ${ringingLine.extension}`;
+        document.getElementById('osNotifCallerName').textContent = ringingLine.remoteName;
+        document.getElementById('osNotifCallerNumber').textContent = ringingLine.remoteNumber;
+        document.getElementById('osNotifContextNote').textContent = otherActive
+          ? `Al contestar se retendrá ${otherActive.name} (${otherActive.remoteName})`
+          : `Destino: Extensión ${ringingLine.extension} (${ringingLine.host})`;
+      } else {
+        osBanner.classList.add('hidden');
+      }
+    }
+
+    function toggleHoldCall(lineId) {
+      const line = lines.find(l => l.id === lineId);
+      if (!line) return;
+
+      if (line.callState === 'ACTIVE') {
+        line.callState = 'HELD';
+        showToast(`${line.name} en espera (a=sendonly)`);
+      } else if (line.callState === 'HELD') {
+        // Put other active calls on hold when resuming this one
+        lines.forEach(other => {
+          if (other.id !== line.id && other.callState === 'ACTIVE') {
+            other.callState = 'HELD';
+          }
+        });
+        line.callState = 'ACTIVE';
+        focusedLineId = line.id;
+        showToast(`${line.name} recuperada (a=sendrecv)`);
+      }
+      renderUI();
+    }
+
+    function swapActiveCalls() {
+      const active = lines.find(l => l.callState === 'ACTIVE');
+      const held = lines.find(l => l.callState === 'HELD');
+      if (active && held) {
+        active.callState = 'HELD';
+        held.callState = 'ACTIVE';
+        focusedLineId = held.id;
+        showToast(`Alternado: ${held.name} activa • ${active.name} retenida`);
+        renderUI();
+      }
+    }
+
+    function toggleDnd() {
+      isDndEnabled = !isDndEnabled;
+      const btn = document.getElementById('dndToggleBtn');
+      const dot = document.getElementById('dndDot');
+      if (isDndEnabled) {
+        btn.className = 'px-2 py-1.5 rounded-xl bg-red-50 text-red-700 text-[11px] font-bold transition border border-red-200 flex items-center gap-1';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-red-500';
+        showToast('No Molestar (DND) activado • Desvío directo a buzón FreePBX');
+      } else {
+        btn.className = 'px-2 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 text-[11px] font-semibold transition border border-noryxs-border/80 flex items-center gap-1';
+        dot.className = 'w-1.5 h-1.5 rounded-full bg-gray-400';
+        showToast('No Molestar (DND) desactivado');
+      }
+    }
+
+    function applyCallForwarding() {
+      const mode = document.getElementById('fwdModeSelect').value;
+      const target = document.getElementById('fwdTargetInput').value.trim();
+      const btn = document.getElementById('fwdToggleBtn');
+      const label = document.getElementById('fwdHeaderLabel');
+
+      if (mode !== 'OFF' && !target) {
+        showToast('Introduce una extensión o número destino para el desvío');
+        return;
+      }
+
+      forwardConfig = { mode, target };
+      document.getElementById('forwardDrawer').classList.add('hidden');
+
+      if (mode === 'OFF') {
+        btn.className = 'px-2 py-1.5 rounded-xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-gray-600 text-[11px] font-semibold transition border border-noryxs-border/80 flex items-center gap-1';
+        label.textContent = 'Desvío';
+        showToast('Desvío de llamadas desactivado');
+      } else {
+        btn.className = 'px-2 py-1.5 rounded-xl bg-noryxs-goldLight text-noryxs-goldDark text-[11px] font-bold transition border border-noryxs-gold flex items-center gap-1';
+        label.textContent = `→ ${target}`;
+        showToast(`Desvío activo hacia ${target} (${mode})`);
+      }
+    }
+
+    function parkActiveCall(lineId) {
+      const line = lines.find(l => l.id === lineId);
+      if (!line || (line.callState !== 'ACTIVE' && line.callState !== 'HELD')) return;
+
+      const orbit = blfExtensions.find(b => b.isParkOrbit && b.status === 'IDLE');
+      if (!orbit) {
+        showToast('No hay órbitas de aparcamiento libres en FreePBX');
+        return;
+      }
+
+      orbit.status = 'BUSY';
+      orbit.parkedCaller = `${line.remoteName} (${line.remoteNumber})`;
+      const callerDisplay = line.remoteName;
+
+      resetLineSession(line);
+      closeTransferPanel();
+      isMuted = false;
+      isDtmfMode = false;
+      isRecordingCall = false;
+      isConferenceActive = false;
+
+      showToast(`Llamada de ${callerDisplay} aparcada en Órbita ${orbit.ext} (*70)`);
+      renderUI();
+    }
+
+    function toggleCallRecording() {
+      isRecordingCall = !isRecordingCall;
+      showToast(isRecordingCall ? 'Grabación local WAV iniciada (PJSIP Recorder)' : 'Grabación detenida y guardada localmente');
+      renderLcdAndControls();
+    }
+
+    function toggleThreeWayConference() {
+      const active = lines.find(l => l.callState === 'ACTIVE');
+      const held = lines.find(l => l.callState === 'HELD');
+      if (!active || !held) {
+        showToast('Necesitas 2 llamadas simultáneas para iniciar conferencia a 3 vías');
+        return;
+      }
+      isConferenceActive = !isConferenceActive;
+      if (isConferenceActive) {
+        held.callState = 'ACTIVE';
+        showToast('Puente de Conferencia a 3 vías activo (Mezcla RTP local PJSIP)');
+      } else {
+        held.callState = 'HELD';
+        showToast(`Conferencia dividida • ${held.name} vuelve a espera`);
+      }
+      renderUI();
+    }
+
+    function dialVoicemailBox() {
+      const line = lines.find(l => l.id === selectedOutboundLineId) || lines[0];
+      initiateOutboundCall('*97', `Buzón de Voz • Ext. ${line.extension}`);
+    }
+
+    function handleBlfClick(ext) {
+      const blf = blfExtensions.find(b => b.ext === ext);
+      if (!blf) return;
+      if (blf.isParkOrbit) {
+        if (blf.status === 'BUSY') {
+          const recoveredInfo = blf.parkedCaller || 'Llamada Aparcada';
+          blf.status = 'IDLE';
+          blf.parkedCaller = '';
+          initiateOutboundCall(blf.ext, `Recuperada Park ${blf.ext}`);
+          showToast(`Recuperando ${recoveredInfo} desde Órbita ${blf.ext}`);
+          renderBlfKeys();
+        } else {
+          showToast(`Órbita ${blf.ext} libre • Pulsa "Aparcar" durante una llamada`);
+        }
+        return;
+      }
+      if (blf.status === 'RINGING') {
+        initiateOutboundCall(`**${blf.ext}`, `Captura BLF • ${blf.label}`);
+        blf.status = 'BUSY';
+        renderBlfKeys();
+      } else {
+        initiateOutboundCall(blf.ext, blf.label);
+      }
+    }
+
+    function renderBlfKeys() {
+      const container = document.getElementById('blfKeysContainer');
+      if (!container) return;
+      container.innerHTML = blfExtensions.map(b => {
+        let dotColor = 'bg-emerald-500';
+        let statusTag = 'Libre';
+        let border = 'border-noryxs-border bg-white hover:border-noryxs-gold';
+        if (b.isParkOrbit) {
+          if (b.status === 'BUSY') {
+            dotColor = 'bg-amber-500 led-pulse';
+            statusTag = 'Aparcada • Rec.';
+            border = 'border-amber-400 bg-amber-50/70';
+          } else {
+            dotColor = 'bg-gray-300';
+            statusTag = 'Órbita Libre';
+          }
+        } else if (b.status === 'BUSY') {
+          dotColor = 'bg-red-500';
+          statusTag = 'Ocupada';
+        } else if (b.status === 'RINGING') {
+          dotColor = 'bg-noryxs-gold led-pulse';
+          statusTag = 'Capturar **';
+          border = 'border-noryxs-gold bg-noryxs-goldLight/60';
+        }
+        return `
+          <button onclick="handleBlfClick('${b.ext}')" class="px-2 py-1.5 rounded-xl border text-left transition flex items-center justify-between ${border}">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full ${dotColor} shrink-0"></span>
+                <span class="text-[11px] font-bold text-noryxs-charcoal truncate">${b.label}</span>
+              </div>
+              <span class="text-[9px] font-mono text-gray-500 block">${b.isParkOrbit ? 'Slot ' + b.ext : 'Ext. ' + b.ext} • ${statusTag}</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function hangupCall(lineId) {
+      const line = lines.find(l => l.id === lineId);
+      if (!line) return;
+
+      if (line.callState === 'RINGING') {
+        stopRingtone();
+        activeRingingLineId = null;
+      }
+
+      const wasName = line.name;
+      resetLineSession(line);
+      closeTransferPanel();
+      isMuted = false;
+      isDtmfMode = false;
+      isRecordingCall = false;
+      isConferenceActive = false;
+      showRtpStats = false;
+
+      // Focus another active/held line if one exists
+      const remaining = lines.find(l => l.callState !== 'IDLE');
+      if (remaining) {
+        focusedLineId = remaining.id;
+      }
+
+      showToast(`BYE enviado • ${wasName} liberada (otras sesiones intactas)`);
+      renderUI();
+    }
+
+    function resetLineSession(line) {
+      line.callState = 'IDLE';
+      line.remoteName = '';
+      line.remoteNumber = '';
+      line.durationSec = 0;
+    }
+
+    function toggleMute() {
+      isMuted = !isMuted;
+      showToast(isMuted ? 'Micrófono silenciado (RTP TX Mute)' : 'Micrófono activo');
+      renderLcdAndControls();
+    }
+
+    function toggleDtmfMode() {
+      isDtmfMode = !isDtmfMode;
+      showToast(isDtmfMode ? 'Modo teclado DTMF activado' : 'Modo marcación estándar');
+      renderLcdAndControls();
+    }
+
+    // --- TRANSFERS (BLIND & ATTENDED) ---
+    function openTransferPanel() {
+      const line = lines.find(l => l.id === focusedLineId);
+      if (!line || (line.callState !== 'ACTIVE' && line.callState !== 'HELD')) return;
+      document.getElementById('transferPanel').classList.remove('hidden');
+      document.getElementById('transferActionButtons').classList.remove('hidden');
+      document.getElementById('attendedConsultBox').classList.add('hidden');
+      document.getElementById('transferTargetInput').focus();
+    }
+
+    function closeTransferPanel() {
+      document.getElementById('transferPanel').classList.add('hidden');
+      document.getElementById('transferTargetInput').value = '';
+    }
+
+    function executeBlindTransfer() {
+      const target = document.getElementById('transferTargetInput').value.trim();
+      if (!target) {
+        showToast('Indica el destino de la transferencia ciega');
+        return;
+      }
+      const line = lines.find(l => l.id === focusedLineId);
+      if (!line) return;
+      showToast(`REFER enviado: Transferencia ciega a ${target}`);
+      resetLineSession(line);
+      closeTransferPanel();
+      renderUI();
+    }
+
+    function startAttendedTransfer() {
+      const target = document.getElementById('transferTargetInput').value.trim();
+      if (!target) {
+        showToast('Indica el destino para consultar antes de transferir');
+        return;
+      }
+      const line = lines.find(l => l.id === focusedLineId);
+      if (!line) return;
+
+      line.callState = 'HELD';
+      document.getElementById('transferActionButtons').classList.add('hidden');
+      document.getElementById('attendedConsultBox').classList.remove('hidden');
+      document.getElementById('consultTargetLabel').textContent = target;
+      showToast(`Llamada original en espera • Consultando con ${target}...`);
+      renderLines();
+    }
+
+    function completeAttendedTransfer() {
+      const target = document.getElementById('consultTargetLabel').textContent;
+      const line = lines.find(l => l.id === focusedLineId);
+      if (!line) return;
+      showToast(`REFER Replaces completado hacia ${target}`);
+      resetLineSession(line);
+      closeTransferPanel();
+      renderUI();
+    }
+
+    function cancelAttendedTransfer() {
+      const line = lines.find(l => l.id === focusedLineId);
+      if (!line) return;
+      line.callState = 'ACTIVE';
+      closeTransferPanel();
+      showToast('Consulta cancelada • Llamada original recuperada');
+      renderUI();
+    }
+
+    // --- SIP CONFIGURATION & NETWORK SIMULATION ---
+    function loadSipConfigForm() {
+      const lineId = parseInt(document.getElementById('configLineSelect').value, 10);
+      const line = lines.find(l => l.id === lineId);
+      if (!line) return;
+
+      document.getElementById('cfgName').value = line.identity;
+      document.getElementById('cfgUser').value = line.extension;
+      document.getElementById('cfgHost').value = line.host;
+      document.getElementById('cfgPort').value = line.port;
+      document.getElementById('cfgTransport').value = line.transport;
+
+      const badge = document.getElementById('cfgRegBadge');
+      if (line.regState === 'REGISTERED') {
+        badge.className = 'px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]';
+        badge.textContent = 'Registrada (200 OK)';
+      } else {
+        badge.className = 'px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 font-semibold text-[11px]';
+        badge.textContent = 'No Registrada';
+      }
+    }
+
+    function testSipRegistration() {
+      const lineId = parseInt(document.getElementById('configLineSelect').value, 10);
+      const line = lines.find(l => l.id === lineId);
+      if (!line) return;
+
+      line.identity = document.getElementById('cfgName').value || line.identity;
+      line.extension = document.getElementById('cfgUser').value || line.extension;
+      line.host = document.getElementById('cfgHost').value || line.host;
+      line.port = document.getElementById('cfgPort').value || line.port;
+      line.transport = document.getElementById('cfgTransport').value;
+      line.regState = 'REGISTERING';
+
+      const badge = document.getElementById('cfgRegBadge');
+      badge.className = 'px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-semibold text-[11px]';
+      badge.textContent = 'Registrando...';
+      renderLines();
+
+      setTimeout(() => {
+        line.regState = 'REGISTERED';
+        loadSipConfigForm();
+        renderUI();
+        showToast(`REGISTER 200 OK • ${line.name} (${line.extension}@${line.host})`);
+      }, 700);
+    }
+
+    function toggleNetworkDrop() {
+      isSimulatedDisconnected = !isSimulatedDisconnected;
+      const btn = document.getElementById('btnNetSim');
+      const globalStatus = document.getElementById('globalRegStatus');
+
+      if (isSimulatedDisconnected) {
+        lines.forEach(l => l.regState = 'ERROR');
+        btn.textContent = 'Reconectar SIP';
+        btn.className = 'px-2.5 py-1.5 rounded-xl bg-red-600 text-white font-medium transition';
+        globalStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Sin Red SIP`;
+        globalStatus.className = 'inline-flex items-center gap-1 text-[10px] font-medium text-red-700';
+        showToast('Conexión perdida con FreePBX • Reintentando registro...');
+      } else {
+        lines.forEach((l, idx) => l.regState = idx < 3 ? 'REGISTERED' : 'UNREGISTERED');
+        btn.textContent = 'Simular Caída SIP';
+        btn.className = 'px-2.5 py-1.5 rounded-xl bg-noryxs-surface hover:bg-red-50 text-gray-600 hover:text-red-700 border border-noryxs-border font-medium transition';
+        globalStatus.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> TLS/SRTP`;
+        globalStatus.className = 'inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700';
+        showToast('Reconexión automática completada • Cuentas registradas');
+      }
+      renderUI();
+    }
+
+    // --- RENDERERS ---
+    function renderUI() {
+      renderLines();
+      renderBlfKeys();
+      renderLcdAndControls();
+      renderOutboundPills();
+      updateRingingNotifications();
+      updateMwiBadges();
+    }
+
+    function updateMwiBadges() {
+      const totalUnread = voicemails.filter(v => v.unread).length;
+      const badge = document.getElementById('mwiHeaderBadge');
+      const dot = document.getElementById('tabMwiDot');
+      if (badge) {
+        badge.textContent = totalUnread;
+        badge.classList.toggle('hidden', totalUnread === 0);
+      }
+      if (dot) {
+        dot.classList.toggle('hidden', totalUnread === 0);
+      }
+    }
+
+    function renderLines() {
+      const container = document.getElementById('linesContainer');
+      const visibleLines = showFourLines ? lines : lines.slice(0, 2);
+
+      container.innerHTML = visibleLines.map(line => {
+        const isFocused = line.id === focusedLineId;
+        let stateBadge = '';
+        let ledClass = 'bg-emerald-500';
+        let cardBorder = isFocused ? 'border-noryxs-gold shadow-gold-glow bg-white' : 'border-noryxs-border bg-noryxs-surface/70 hover:bg-white';
+
+        if (line.regState !== 'REGISTERED') {
+          ledClass = 'bg-red-500';
+          stateBadge = `<span class="text-[10px] font-semibold text-red-600">Desconectada</span>`;
+        } else if (line.callState === 'RINGING') {
+          ledClass = 'bg-noryxs-gold led-pulse';
+          cardBorder = 'border-noryxs-gold bg-noryxs-goldLight/60 shadow-gold-glow';
+          stateBadge = `<span class="text-[10px] font-bold text-noryxs-goldDark">Sonando...</span>`;
+        } else if (line.callState === 'OUTBOUND') {
+          ledClass = 'bg-sky-500';
+          stateBadge = `<span class="text-[10px] font-semibold text-sky-700">Llamando...</span>`;
+        } else if (line.callState === 'ACTIVE') {
+          ledClass = 'bg-emerald-500';
+          cardBorder = 'border-emerald-500/70 bg-emerald-50/30';
+          stateBadge = `<span class="text-[10px] font-bold text-emerald-700 font-mono">${formatDuration(line.durationSec)}</span>`;
+        } else if (line.callState === 'HELD') {
+          ledClass = 'bg-amber-500';
+          cardBorder = 'border-amber-400/80 bg-amber-50/40';
+          stateBadge = `<span class="text-[10px] font-semibold text-amber-700">Retenida</span>`;
+        } else {
+          stateBadge = `<span class="text-[10px] font-medium text-gray-400">Libre</span>`;
+        }
+
+        const callerLine = line.callState !== 'IDLE'
+          ? `<p class="text-xs font-semibold text-noryxs-charcoal truncate mt-1">${line.remoteName}</p>
+             <p class="font-mono text-[10px] text-gray-500 truncate">${line.remoteNumber}</p>`
+          : `<p class="text-[11px] text-gray-500 truncate mt-1">${line.identity}</p>
+             <div class="flex items-center justify-between mt-0.5">
+               <p class="font-mono text-[10px] text-gray-400">${line.host}</p>
+               ${line.unreadVm > 0 ? `<button onclick="event.stopPropagation(); switchTab('voicemail')" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-noryxs-goldLight text-noryxs-goldDark font-mono text-[9px] font-bold hover:bg-noryxs-gold/20" title="Mensajes en buzón de voz">Buzón (${line.unreadVm})</button>` : ''}
+             </div>`;
+
+        return `
+          <div onclick="focusLine(${line.id})" class="cursor-pointer rounded-2xl border p-3 transition-all ${cardBorder}">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="relative inline-block w-2 h-2 rounded-full ${ledClass}"></span>
+                <span class="text-[11px] font-bold tracking-tight text-noryxs-charcoal">${line.name}</span>
+                <span class="font-mono text-[11px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-700 font-semibold">${line.extension}</span>
+              </div>
+              ${stateBadge}
+            </div>
+            ${callerLine}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderLcdAndControls() {
+      const line = lines.find(l => l.id === focusedLineId) || lines[0];
+      const lcd = document.getElementById('lcdContent');
+      const controls = document.getElementById('activeCallControls');
+      const rtpDrawer = document.getElementById('rtpStatsDrawer');
+
+      const otherHeldOrActive = lines.find(l => l.id !== line.id && (l.callState === 'ACTIVE' || l.callState === 'HELD'));
+
+      if (line.callState === 'IDLE') {
+        controls.classList.add('hidden');
+        if (rtpDrawer) rtpDrawer.classList.add('hidden');
+        showRtpStats = false;
+        closeTransferPanel();
+        lcd.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-noryxs-charcoal">${line.name} • Extensión ${line.extension}</span>
+                <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${line.regState === 'REGISTERED' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}">
+                  ${line.regState === 'REGISTERED' ? 'Registrada' : 'Sin Registro'}
+                </span>
+              </div>
+              <p class="text-[11px] text-gray-500 mt-0.5">${line.identity} • Códec ${line.codec} (${line.transport})</p>
+            </div>
+            <div class="text-right font-mono">
+              <span class="text-xs font-semibold text-gray-700 block">LISTO</span>
+              <span class="text-[10px] text-noryxs-goldDark">SRTP ON</span>
+            </div>
+          </div>
+          ${otherHeldOrActive ? `
+            <div onclick="focusLine(${otherHeldOrActive.id})" class="mt-2.5 pt-2 border-t border-noryxs-border/80 flex items-center justify-between text-[11px] cursor-pointer text-amber-800 bg-amber-50/80 px-2.5 py-1.5 rounded-xl">
+              <span>Sesión en curso en <strong>${otherHeldOrActive.name}</strong> (${otherHeldOrActive.remoteName})</span>
+              <span class="font-semibold underline">Ver sesión →</span>
+            </div>
+          ` : ''}
+        `;
+        return;
+      }
+
+      // RINGING STATE
+      if (line.callState === 'RINGING') {
+        controls.classList.remove('hidden');
+        if (rtpDrawer) rtpDrawer.classList.add('hidden');
+        lcd.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="inline-block px-2 py-0.5 rounded-full bg-noryxs-goldLight text-noryxs-goldDark text-[10px] font-bold uppercase tracking-wider mb-1">
+                Llamada Entrante en ${line.name} (Ext. ${line.extension})
+              </span>
+              <h2 class="text-base font-bold text-noryxs-charcoal">${line.remoteName}</h2>
+              <p class="font-mono text-xs text-gray-600">${line.remoteNumber}</p>
+            </div>
+            <div class="w-10 h-10 rounded-full bg-noryxs-goldLight border border-noryxs-gold/40 flex items-center justify-center">
+              <svg class="w-5 h-5 text-noryxs-goldDark animate-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+              </svg>
+            </div>
+          </div>
+        `;
+        controls.innerHTML = `
+          <button onclick="answerRingingCall(${line.id})" class="col-span-2 py-2.5 px-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm tactile-btn">
+            Contestar Llamada
+          </button>
+          <button onclick="rejectRingingCall(${line.id})" class="py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-semibold text-xs flex items-center justify-center gap-1 shadow-sm tactile-btn">
+            Rechazar
+          </button>
+        `;
+        return;
+      }
+
+      // OUTBOUND / ACTIVE / HELD STATES
+      controls.classList.remove('hidden');
+      if (rtpDrawer) {
+        rtpDrawer.classList.toggle('hidden', !showRtpStats);
+        if (showRtpStats) {
+          const jitter = (2.4 + (line.durationSec % 5) * 0.3).toFixed(1);
+          const rtt = 16 + (line.durationSec % 4);
+          document.getElementById('statJitter').textContent = `${jitter} ms`;
+          document.getElementById('statRtt').textContent = `${rtt} ms`;
+        }
+      }
+      const isHeld = line.callState === 'HELD';
+      const statusBadge = line.callState === 'OUTBOUND'
+        ? '<span class="px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 text-[10px] font-semibold">Conectando SIP...</span>'
+        : isHeld
+          ? '<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold">En Espera (Hold)</span>'
+          : '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-semibold">RTP Activo</span>';
+
+      lcd.innerHTML = `
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-[11px] font-bold text-gray-500">${line.name} • Ext. ${line.extension}</span>
+              ${statusBadge}
+            </div>
+            <h2 class="text-base font-bold text-noryxs-charcoal mt-0.5">${line.remoteName}</h2>
+            <p class="font-mono text-xs text-gray-500">${line.remoteNumber}</p>
+          </div>
+          <div class="text-right">
+            <span class="font-mono text-lg font-bold text-noryxs-charcoal">${formatDuration(line.durationSec)}</span>
+            <button onclick="toggleRtpStats()" title="Ver telemetría RTP / MOS" class="mt-0.5 ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded bg-white hover:border-noryxs-gold border border-noryxs-border text-[10px] text-gray-600 font-mono transition">
+              <span>${line.codec} • SRTP</span>
+              <span class="text-noryxs-goldDark font-bold">ⓘ</span>
+            </button>
+          </div>
+        </div>
+        ${isDtmfMode ? `<div class="mt-2 px-2.5 py-1 rounded-lg bg-noryxs-charcoal text-noryxs-gold text-[11px] font-medium">Teclado numérico en modo tonos DTMF activo</div>` : ''}
+      `;
+
+      const hasOtherCall = lines.some(l => l.id !== line.id && (l.callState === 'ACTIVE' || l.callState === 'HELD'));
+
+      if (line.callState === 'OUTBOUND') {
+        controls.innerHTML = `
+          <button onclick="hangupCall(${line.id})" class="col-span-3 py-2.5 px-3 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm tactile-btn">
+            Cancelar Llamada
+          </button>
+        `;
+      } else {
+        const holdBtn = isHeld
+          ? `<button onclick="toggleHoldCall(${line.id})" class="py-2.5 px-2 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs flex flex-col items-center justify-center tactile-btn"><span>Recuperar</span></button>`
+          : `<button onclick="toggleHoldCall(${line.id})" class="py-2.5 px-2 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border text-noryxs-charcoal font-semibold text-xs flex flex-col items-center justify-center tactile-btn"><span>Retener</span></button>`;
+
+        const swapOrDtmfBtn = hasOtherCall
+          ? `<button onclick="swapActiveCalls()" class="py-2.5 px-2 rounded-2xl bg-noryxs-goldLight hover:bg-noryxs-gold/20 border border-noryxs-gold text-noryxs-goldDark font-bold text-xs flex flex-col items-center justify-center tactile-btn"><span>Alternar</span></button>`
+          : `<button onclick="toggleDtmfMode()" class="py-2.5 px-2 rounded-2xl ${isDtmfMode ? 'bg-noryxs-charcoal text-white' : 'bg-noryxs-surface hover:bg-noryxs-surfaceHover text-noryxs-charcoal border border-noryxs-border'} font-semibold text-xs flex flex-col items-center justify-center tactile-btn"><span>DTMF</span></button>`;
+
+        const confOrParkBtn = hasOtherCall
+          ? `<button onclick="toggleThreeWayConference()" class="py-2.5 px-2 rounded-2xl ${isConferenceActive ? 'bg-noryxs-charcoal text-noryxs-gold border-noryxs-gold' : 'bg-noryxs-surface hover:bg-noryxs-surfaceHover text-noryxs-charcoal border border-noryxs-border'} border font-semibold text-xs flex flex-col items-center justify-center tactile-btn"><span>${isConferenceActive ? 'Dividir Conf.' : 'Conferencia'}</span></button>`
+          : `<button onclick="parkActiveCall(${line.id})" class="py-2.5 px-2 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover text-noryxs-charcoal border border-noryxs-border font-semibold text-xs flex flex-col items-center justify-center tactile-btn"><span>Aparcar 71</span></button>`;
+
+        controls.innerHTML = `
+          ${holdBtn}
+          <button onclick="openTransferPanel()" class="py-2.5 px-2 rounded-2xl bg-noryxs-surface hover:bg-noryxs-surfaceHover border border-noryxs-border text-noryxs-charcoal font-semibold text-xs flex flex-col items-center justify-center tactile-btn">
+            <span>Transferir</span>
+          </button>
+          <button onclick="toggleMute()" class="py-2.5 px-2 rounded-2xl ${isMuted ? 'bg-amber-100 border-amber-400 text-amber-900' : 'bg-noryxs-surface hover:bg-noryxs-surfaceHover border-noryxs-border text-noryxs-charcoal'} border font-semibold text-xs flex flex-col items-center justify-center tactile-btn">
+            <span>${isMuted ? 'Silenciado' : 'Silenciar'}</span>
+          </button>
+          ${swapOrDtmfBtn}
+          ${confOrParkBtn}
+          <button onclick="hangupCall(${line.id})" class="py-2.5 px-2 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-semibold text-xs flex items-center justify-center gap-1 shadow-sm tactile-btn">
+            Colgar L${line.id}
+          </button>
+        `;
+      }
+    }
+
+    function renderOutboundPills() {
+      [1, 2].forEach(id => {
+        const pill = document.getElementById(`outLinePill${id}`);
+        const line = lines.find(l => l.id === id);
+        pill.textContent = `Línea ${id} • Ext. ${line.extension}`;
+        if (selectedOutboundLineId === id) {
+          pill.className = 'px-2.5 py-0.5 rounded-full font-semibold transition border bg-noryxs-goldLight border-noryxs-gold text-noryxs-goldDark';
+        } else {
+          pill.className = 'px-2.5 py-0.5 rounded-full font-medium transition border bg-noryxs-surface border-noryxs-border text-gray-500 hover:text-gray-800';
+        }
+      });
+      const activeOut = lines.find(l => l.id === selectedOutboundLineId);
+      document.getElementById('callButtonLabel').textContent = `Llamar desde ${activeOut.name} (${activeOut.extension})`;
+    }
+
+    // --- VOICEMAIL, CONTACTS & HISTORY RENDERERS ---
+    function playVoicemailClip(vmId) {
+      const vm = voicemails.find(v => v.id === vmId);
+      if (!vm) return;
+      if (vm.unread) {
+        vm.unread = false;
+        const line = lines.find(l => l.id === vm.lineId);
+        if (line && line.unreadVm > 0) line.unreadVm -= 1;
+        updateMwiBadges();
+        renderLines();
+      }
+      showToast(`Reproduciendo mensaje de voz de ${vm.caller} (${vm.duration})`);
+      renderVoicemails();
+    }
+
+    function renderVoicemails() {
+      const list = document.getElementById('voicemailList');
+      if (!list) return;
+      list.innerHTML = voicemails.map(vm => `
+        <div class="p-3 rounded-2xl border ${vm.unread ? 'bg-noryxs-goldLight/50 border-noryxs-gold/60' : 'bg-noryxs-surface border-noryxs-border'} flex items-center justify-between">
+          <div class="min-w-0 pr-2">
+            <div class="flex items-center gap-1.5">
+              ${vm.unread ? '<span class="w-2 h-2 rounded-full bg-noryxs-gold shrink-0"></span>' : ''}
+              <p class="text-xs font-bold text-noryxs-charcoal truncate">${vm.caller}</p>
+              <span class="px-1.5 py-0.2 rounded bg-white border border-noryxs-border font-mono text-[9px] text-gray-600">Línea ${vm.lineId} • Ext. ${vm.ext}</span>
+            </div>
+            <p class="font-mono text-[11px] text-gray-600 mt-0.5">${vm.number} • Duración ${vm.duration}</p>
+            <p class="text-[10px] text-gray-400">${vm.time}</p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="playVoicemailClip('${vm.id}')" class="px-2.5 py-1.5 rounded-xl bg-white hover:bg-gray-100 border border-noryxs-border text-noryxs-charcoal text-[11px] font-semibold transition">
+              Escuchar
+            </button>
+            <button onclick="selectOutboundLine(${vm.lineId}); initiateOutboundCall('${vm.number}', '${vm.caller}')" class="px-2.5 py-1.5 rounded-xl bg-noryxs-charcoal hover:bg-black text-white text-[11px] font-semibold transition">
+              Devolver
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderContacts() {
+      const query = (document.getElementById('contactSearch').value || '').toLowerCase();
+      const filtered = contacts.filter(c =>
+        c.name.toLowerCase().includes(query) ||
+        c.company.toLowerCase().includes(query) ||
+        c.number.includes(query)
+      );
+
+      document.getElementById('contactsList').innerHTML = filtered.map(c => `
+        <div class="p-3 rounded-2xl bg-noryxs-surface hover:bg-white border border-noryxs-border flex items-center justify-between transition">
+          <div>
+            <div class="flex items-center gap-1.5">
+              <p class="text-xs font-bold text-noryxs-charcoal">${c.name}</p>
+              ${c.fav ? '<span class="text-noryxs-gold text-xs">★</span>' : ''}
+            </div>
+            <p class="text-[11px] text-gray-500">${c.company}</p>
+            <p class="font-mono text-xs text-gray-700 mt-0.5">${c.number}</p>
+          </div>
+          <button onclick="initiateOutboundCall('${c.number}', '${c.name}')" class="px-3 py-2 rounded-xl bg-noryxs-charcoal hover:bg-black text-white text-xs font-semibold transition tactile-btn">
+            Llamar
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function addHistoryRecord(type, name, number, lineId, duration) {
+      callHistory.unshift({
+        type,
+        name,
+        number,
+        lineId,
+        time: 'Ahora mismo',
+        duration
+      });
+    }
+
+    function renderHistory() {
+      document.getElementById('historyList').innerHTML = callHistory.map(h => {
+        const badge = h.type === 'incoming'
+          ? '<span class="text-emerald-600 font-bold">↙ Entrante</span>'
+          : h.type === 'outgoing'
+            ? '<span class="text-sky-600 font-bold">↗ Saliente</span>'
+            : '<span class="text-red-600 font-bold">✕ Perdida</span>';
+
+        return `
+          <div class="p-3 rounded-2xl bg-noryxs-surface border border-noryxs-border flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2 text-[10px]">
+                ${badge}
+                <span class="text-gray-400">• Línea ${h.lineId}</span>
+                <span class="text-gray-400">• ${h.time}</span>
+              </div>
+              <p class="text-xs font-bold text-noryxs-charcoal mt-0.5">${h.name}</p>
+              <p class="font-mono text-[11px] text-gray-600">${h.number} <span class="text-gray-400">(${h.duration})</span></p>
+            </div>
+            <button onclick="selectOutboundLine(${h.lineId}); initiateOutboundCall('${h.number}', '${h.name}')" class="px-3 py-1.5 rounded-xl bg-white hover:bg-noryxs-goldLight border border-noryxs-border hover:border-noryxs-gold text-xs font-semibold text-noryxs-charcoal transition">
+              Devolver
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- UTILITIES ---
+    function formatDuration(sec) {
+      const m = String(Math.floor(sec / 60)).padStart(2, '0');
+      const s = String(sec % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    let toastTimeout = null;
+    function showToast(message) {
+      const banner = document.getElementById('toastBanner');
+      document.getElementById('toastText').textContent = message;
+      banner.classList.remove('opacity-0');
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        banner.classList.add('opacity-0');
+      }, 3000);
+    }
+
+    // Initialize UI on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      renderUI();
+    });
+  </script>
+</body>
+</html>

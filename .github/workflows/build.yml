@@ -1,0 +1,207 @@
+name: Build NORYXS
+
+# Se compila al integrar en main (pull request desde developer) o a mano desde Actions.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Si se sube otra vez antes de terminar, se cancela la compilación anterior
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PJSIP_VERSION: "2.17"
+  PJSIP_COMMON_FLAGS: >-
+    --disable-video --disable-v4l2 --disable-sdl --disable-ffmpeg
+    --disable-openh264 --disable-libyuv --disable-libwebrtc
+
+jobs:
+  # ------------------------------------------------------------------ macOS
+  macos:
+    name: macOS (arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias (OpenSSL, Opus)
+        run: brew install openssl@3 opus pkgconf
+
+      - name: Caché de PJSIP
+        id: pjcache
+        uses: actions/cache@v4
+        with:
+          path: third_party/pjsip-install
+          key: pjsip-macos-${{ env.PJSIP_VERSION }}-${{ hashFiles('native/engine/pjsip_config_site.h') }}
+
+      - name: Compilar PJSIP ${{ env.PJSIP_VERSION }}
+        if: steps.pjcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p third_party && cd third_party
+          git clone --depth 1 --branch "$PJSIP_VERSION" https://github.com/pjsip/pjproject.git
+          cd pjproject
+          cp ../../native/engine/pjsip_config_site.h pjlib/include/pj/config_site.h
+          ./configure --prefix="$(cd .. && pwd)/pjsip-install" \
+            --with-ssl="$(brew --prefix openssl@3)" --with-opus="$(brew --prefix opus)" \
+            $PJSIP_COMMON_FLAGS CFLAGS="-O2 -fPIC"
+          make -j"$(sysctl -n hw.ncpu)"
+          make install
+
+      - name: Motor nativo
+        run: make -C native/engine
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7   # misma versión que en el Mac de desarrollo
+          channel: stable
+          cache: true
+
+      - name: Analizar Dart y pruebas
+        working-directory: app
+        run: |
+          flutter analyze --no-fatal-infos
+          flutter test
+
+      - name: Compilar app macOS
+        working-directory: app
+        run: flutter build macos --release --dart-define=BUILD=${{ github.sha }}
+
+      - name: Empaquetar
+        run: |
+          cd "app/build/macos/Build/Products/Release"
+          ditto -c -k --keepParent "NORYXS Terminal.app" "$GITHUB_WORKSPACE/NORYXS-Terminal-macOS.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NORYXS-Terminal-macOS
+          path: NORYXS-Terminal-macOS.zip
+
+  # ---------------------------------------------------------------- Windows
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # PJSIP y el motor se compilan con MinGW-w64 (UCRT) en MSYS2: dan una DLL C
+      # autocontenida que la app Flutter (MSVC) carga por FFI.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            make git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-opus
+            mingw-w64-ucrt-x86_64-pkgconf
+
+      # PJSIP 2.17 no es compatible con OpenSSL 4.x (MSYS2 ya trae 4.1): se fija la última 3.x
+      - name: OpenSSL 3.6 (compatible con PJSIP 2.17)
+        shell: msys2 {0}
+        run: |
+          pacman -U --noconfirm https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-openssl-3.6.5-1-any.pkg.tar.zst
+          pkg-config --modversion openssl
+
+      - name: Caché de PJSIP
+        id: pjcache
+        uses: actions/cache@v4
+        with:
+          path: third_party/pjsip-install
+          key: pjsip-v3-windows-ucrt64-openssl36-${{ env.PJSIP_VERSION }}-${{ hashFiles('native/engine/pjsip_config_site.h') }}
+
+      - name: Compilar PJSIP ${{ env.PJSIP_VERSION }}
+        if: steps.pjcache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          mkdir -p third_party && cd third_party
+          git clone --depth 1 --branch "$PJSIP_VERSION" https://github.com/pjsip/pjproject.git
+          cd pjproject
+          cp ../../native/engine/pjsip_config_site.h pjlib/include/pj/config_site.h
+          # GCC 14+ trata como error los avisos de tipos que da PJSIP 2.17 con el OpenSSL
+          # reciente de MSYS2 (ssl_sock_ossl.c): se dejan como avisos.
+          ./configure --prefix="$(cd .. && pwd)/pjsip-install" --with-ssl=/ucrt64 --with-opus=/ucrt64 \
+            $PJSIP_COMMON_FLAGS CFLAGS="-O2 -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=implicit-function-declaration -Wno-error=discarded-qualifiers"
+          make -j"$(nproc)"
+          make install
+
+      - name: Motor nativo (noryxs_engine.dll)
+        shell: msys2 {0}
+        run: |
+          make -C native/engine -f Makefile.win
+          objdump -p native/engine/build-win/noryxs_engine.dll | grep "DLL Name"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7   # misma versión que en el Mac de desarrollo
+          channel: stable
+          cache: true
+
+      - name: Compilar app Windows
+        working-directory: app
+        run: flutter build windows --release --dart-define=BUILD=${{ github.sha }}
+
+      - name: Empaquetar
+        shell: pwsh
+        run: Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath NORYXS-Terminal-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NORYXS-Terminal-Windows
+          path: NORYXS-Terminal-Windows.zip
+
+  # ------------------------------------------------------------------ Linux
+  linux:
+    name: Linux (x64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev libopus-dev \
+            libasound2-dev libsecret-1-dev uuid-dev clang cmake ninja-build libgtk-3-dev \
+            libfontconfig1-dev libayatana-appindicator3-dev
+
+      - name: Caché de PJSIP
+        id: pjcache
+        uses: actions/cache@v4
+        with:
+          path: third_party/pjsip-install
+          key: pjsip-v2-linux-${{ env.PJSIP_VERSION }}-${{ hashFiles('native/engine/pjsip_config_site.h') }}
+
+      - name: Compilar PJSIP ${{ env.PJSIP_VERSION }}
+        if: steps.pjcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p third_party && cd third_party
+          git clone --depth 1 --branch "$PJSIP_VERSION" https://github.com/pjsip/pjproject.git
+          cd pjproject
+          cp ../../native/engine/pjsip_config_site.h pjlib/include/pj/config_site.h
+          ./configure --prefix="$(cd .. && pwd)/pjsip-install" $PJSIP_COMMON_FLAGS CFLAGS="-O2 -fPIC"
+          make -j"$(nproc)"
+          make install
+
+      - name: Motor nativo (libnoryxs_engine.so)
+        run: |
+          make -C native/engine -f Makefile.linux
+          ldd native/engine/build-linux/libnoryxs_engine.so
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.7   # misma versión que en el Mac de desarrollo
+          channel: stable
+          cache: true
+
+      - name: Compilar app Linux
+        working-directory: app
+        run: flutter build linux --release --dart-define=BUILD=${{ github.sha }}
+
+      - name: Paquete .deb
+        run: packaging/linux/build_deb.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NORYXS-Terminal-Linux
+          path: "*.deb"

@@ -1,0 +1,19 @@
+# Dependencias y compilados
+third_party/
+native/engine/build/
+app/build/
+app/.dart_tool/
+*.log
+
+# Credenciales de prueba: NUNCA subir
+*.conf
+cuentas*.txt
+
+# Credenciales de la centralita de pruebas
+pbx/*.local*
+native/engine/build-ios/
+
+# macOS
+.DS_Store
+native/engine/build-linux/
+native/engine/build-win/
