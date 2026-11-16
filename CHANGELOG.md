@@ -4,6 +4,15 @@ Formato: cambios agrupados por fecha, del más reciente al más antiguo. Cada en
 
 ---
 
+## CI de Windows: transcripción
+
+- **Fallo**: el job de Windows terminaba con código 127 (comando no encontrado) en el paso nuevo de whisper.cpp y el modelo.
+- **Causa**: Git en Windows convierte los `.sh` a CRLF al hacer el checkout; `#!/usr/bin/env bash\r` no existe y bash falla con `\r`.
+- **Solución**:
+  - `.gitattributes` fuerza LF en `*.sh`, Makefiles y C.
+  - La descarga del modelo pasa al bash de Git (curl y sha1sum incluidos) y se añade `curl` a MSYS2.
+- **Prueba**: pendiente del siguiente job de Windows.
+
 ## 16/11/2026 — Fase 8: mejoras
 
 NORYXS incorpora todas las mejoras de la Fase 8 (descritas en las entradas siguientes). Conserva su nombre, su paleta oro/grafito (ahora también en modo oscuro), su logotipo, sus rutas (`NORYXS/`, `Documentos/NORYXS Grabaciones`) y su esquema de enlaces `noryxs:`. Las entradas siguientes describen cada mejora.
