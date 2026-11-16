@@ -17,6 +17,7 @@ Formato: cambios agrupados por fecha, del más reciente al más antiguo. Cada en
 - **Tercer fallo (enlace del motor)**: `ld: cannot find .../whisper.cpp/build/ggml/src/libggml.a`. En Windows CMake deja las bibliotecas de ggml en otra carpeta.
   - Solución: `compilar_whisper.sh` copia `whisper`, `ggml`, `ggml-cpu`, `ggml-base` (y `ggml-blas` si existe) a `build/libs` con nombre fijo, y avisa si falta alguna.
   - Los tres Makefiles enlazan desde ahí; en Linux y Windows dentro de `--start-group … --end-group`, para que no importe el orden.
+- **Cuarto fallo (Linux y Windows)**: `cc: error: unrecognized command-line option '-Wl'`. Las comas de `-Wl,--start-group` dentro de `$(if …)` del Makefile hacían que make partiera la opción. Ahora van en variables (`WH_GRP`, `WH_CXX`) y se ha comprobado la orden de enlace de ambos Makefiles con `make -n`.
 - **Prueba**: en macOS, whisper recompilado desde cero con el script nuevo, motor enlazado y transcripción correcta. Windows y Linux, pendientes del siguiente job.
 
 ## 16/11/2026 — Fase 8: mejoras

@@ -18,6 +18,9 @@ ifneq ($(WH_LIB),)
 WH_A   := $(WH)/build/libs/libwhisper.a $(WH)/build/libs/libggml.a $(WH)/build/libs/libggml-cpu.a $(WH)/build/libs/libggml-base.a
 WH_CF  := -I$(WH)/include -I$(WH)/ggml/include
 WH_O   := build-linux/nx_transcribe.o
+# Enlazadas en grupo: no importa el orden entre whisper y las partes de ggml
+WH_GRP := -Wl,--start-group $(WH_A) -Wl,--end-group
+WH_CXX := -lstdc++
 endif
 
 CC     ?= gcc
@@ -34,7 +37,7 @@ build-linux/%.o: src/%.c include/noryxs_engine.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 build-linux/libnoryxs_engine.so: $(OBJS)
-	$(CC) -shared -o $@ $(OBJS) $(if $(WH_A),-Wl,--start-group $(WH_A) -Wl,--end-group) -Wl,--no-undefined -Wl,-soname,libnoryxs_engine.so $(LIBS) $(if $(WH_A),-lstdc++)
+	$(CC) -shared -o $@ $(OBJS) $(WH_GRP) -Wl,--no-undefined -Wl,-soname,libnoryxs_engine.so $(LIBS) $(WH_CXX)
 
 build-linux/nx_cli: tools/nx_cli.c build-linux/libnoryxs_engine.so
 	$(CC) -O2 -Wall -Iinclude $< -Lbuild-linux -lnoryxs_engine -Wl,-rpath,'$$ORIGIN' -o $@

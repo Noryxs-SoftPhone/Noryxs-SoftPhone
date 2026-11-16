@@ -19,6 +19,9 @@ ifneq ($(WH_LIB),)
 WH_A   := $(WH)/build/libs/libwhisper.a $(WH)/build/libs/libggml.a $(WH)/build/libs/libggml-cpu.a $(WH)/build/libs/libggml-base.a
 WH_CF  := -I$(WH)/include -I$(WH)/ggml/include
 WH_O   := build-win/nx_transcribe.o
+# Enlazadas en grupo: no importa el orden entre whisper y las partes de ggml
+WH_GRP := -Wl,--start-group $(WH_A) -Wl,--end-group
+WH_CXX := -static-libstdc++ -lstdc++
 endif
 
 CC     ?= gcc
@@ -35,7 +38,7 @@ build-win/%.o: src/%.c include/noryxs_engine.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 build-win/noryxs_engine.dll: $(OBJS)
-	$(CC) -shared -static -static-libgcc -o $@ $(OBJS) $(if $(WH_A),-Wl,--start-group $(WH_A) -Wl,--end-group) $(LIBS) $(if $(WH_A),-static-libstdc++ -lstdc++) -Wl,--out-implib,build-win/libnoryxs_engine.dll.a
+	$(CC) -shared -static -static-libgcc -o $@ $(OBJS) $(WH_GRP) $(LIBS) $(WH_CXX) -Wl,--out-implib,build-win/libnoryxs_engine.dll.a
 
 clean:
 	rm -rf build-win

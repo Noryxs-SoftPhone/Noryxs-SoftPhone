@@ -153,7 +153,7 @@ NX_API char *nx_transcribe(const char *wav, const char *model, const char *lang,
     for (i = 0; i < segs; ++i) {
         const char *t = whisper_full_get_segment_text(g_ctx, i);
         long cs = (long)whisper_full_get_segment_t0(g_ctx, i);   /* centésimas de segundo */
-        char stamp[24];
+        char stamp[32];
         size_t need;
         while (t && *t == ' ') ++t;
         if (!t || !*t) continue;
