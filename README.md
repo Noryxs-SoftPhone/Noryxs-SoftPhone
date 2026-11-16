@@ -342,8 +342,8 @@ Ver **[docs/ROADMAP.md](docs/ROADMAP.md)**. A fecha de 15/11/2026:
 - ✅ Versión iPhone de pruebas instalada (segundo plano con notificación).
 - ✅ Corregidos los cierres repentinos de la app (avisos BLF) y el teclado DTMF en llamada.
 - ✅ Mac en la barra de menús y arranque al iniciar sesión.
-- ⏳ Batería completa de las 15 pruebas obligatorias con dos líneas en la app (ver tabla en el roadmap).
-- ⏳ Windows y Linux · PushKit/CallKit en iPhone · lista de mensajes de voz por IMAP.
+- ✅ Batería completa de las 15 pruebas obligatorias con dos líneas en la app (ver tabla en el roadmap).
+- ✅ Windows y Linux · PushKit/CallKit en iPhone · lista de mensajes de voz por IMAP.
 
 ---
 
