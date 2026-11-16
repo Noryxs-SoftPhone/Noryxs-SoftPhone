@@ -2,10 +2,12 @@
 
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <commdlg.h>
 
 #include <flutter/standard_method_codec.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 using std::max;
 using std::min;
@@ -14,7 +16,18 @@ using std::min;
 
 #include "resource.h"
 
+std::string g_nx_initial_url;
+
+bool NxIsDialUrl(const std::string& s) {
+  std::string l = s.substr(0, 7);
+  for (auto& ch : l) ch = (char)tolower((unsigned char)ch);
+  return l.rfind("tel:", 0) == 0 || l.rfind("sip:", 0) == 0 || l.rfind("sips:", 0) == 0 || l.rfind("callto:", 0) == 0 || l.rfind("softsall", 0) == 0;
+}
+
 namespace {
+
+constexpr wchar_t kUrlProgId[] = L"Noryxs.Url";
+constexpr wchar_t kAppKey[] = L"Software\\NORYXS\\Capabilities";
 
 constexpr UINT kTrayMessage = WM_APP + 41;
 constexpr UINT kTrayId = 1;
@@ -174,7 +187,7 @@ class NxCallCard {
 
   void Create() {
     hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kCardClass,
-                            L"NORYXS Terminal · Llamada entrante", WS_POPUP, 0, 0, 10, 10, nullptr,
+                            L"NORYXS Terminal \u00b7 Llamada entrante", WS_POPUP, 0, 0, 10, 10, nullptr,
                             nullptr, GetModuleHandle(nullptr), this);
     // Esquinas redondeadas de Windows 11 (en Windows 10 se ignora)
     DWORD pref = 2;  // DWMWCP_ROUND
@@ -377,6 +390,25 @@ NxDesktop::NxDesktop(HWND window, flutter::BinaryMessenger* messenger) : window_
   channel_->SetMethodCallHandler([this](const auto& call, auto result) { OnMethodCall(call, std::move(result)); });
   card_ = std::make_unique<NxCallCard>(this);
   taskbar_created_msg_ = RegisterWindowMessageW(L"TaskbarCreated");
+  if (!g_nx_initial_url.empty()) pending_urls_.push_back(g_nx_initial_url);
+  // Enlaces noryxs: (configuración de puestos): esquema propio, sin pedir nada al usuario
+  {
+    std::wstring cls = L"Software\\Classes\\noryxs";
+    std::wstring cmd = L"\"" + ExePath() + L"\" \"%1\"";
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, cls.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+      const wchar_t desc[] = L"URL NORYXS";
+      RegSetValueExW(key, nullptr, 0, REG_SZ, reinterpret_cast<const BYTE*>(desc), sizeof(desc));
+      RegSetValueExW(key, L"URL Protocol", 0, REG_SZ, reinterpret_cast<const BYTE*>(L""), sizeof(wchar_t));
+      RegCloseKey(key);
+    }
+    HKEY ck;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, (cls + L"\\shell\\open\\command").c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &ck,
+                        nullptr) == ERROR_SUCCESS) {
+      RegSetValueExW(ck, nullptr, 0, REG_SZ, reinterpret_cast<const BYTE*>(cmd.c_str()), (DWORD)((cmd.size() + 1) * sizeof(wchar_t)));
+      RegCloseKey(ck);
+    }
+  }
   AddTrayIcon();
 }
 
@@ -421,6 +453,47 @@ void NxDesktop::OnMethodCall(const flutter::MethodCall<flutter::EncodableValue>&
       RegCloseKey(key);
     }
     result->Success(flutter::EncodableValue(ok));
+    return;
+  } else if (m == "pickFile" || m == "saveFile") {
+    // Selector de ficheros nativo (CSV de habitaciones, configuración de puestos)
+    wchar_t file[MAX_PATH] = {0};
+    std::wstring name = Utf8ToWide(GetStr(a, "name"));
+    if (m == "saveFile") wcsncpy_s(file, name.c_str(), _TRUNCATE);
+    std::wstring title = Utf8ToWide(GetStr(a, "title"));
+    OPENFILENAMEW ofn = {sizeof(ofn)};
+    ofn.hwndOwner = window_;
+    ofn.lpstrFilter = L"Todos los ficheros\0*.*\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrTitle = title.empty() ? nullptr : title.c_str();
+    ofn.Flags = OFN_EXPLORER | OFN_NOCHANGEDIR | (m == "saveFile" ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST);
+    BOOL ok = m == "saveFile" ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
+    if (!ok) {
+      result->Success();
+      return;
+    }
+    int n = WideCharToMultiByte(CP_UTF8, 0, file, -1, nullptr, 0, nullptr, nullptr);
+    std::string path(n > 0 ? n - 1 : 0, '\0');
+    if (n > 1) WideCharToMultiByte(CP_UTF8, 0, file, -1, &path[0], n, nullptr, nullptr);
+    result->Success(flutter::EncodableValue(path));
+    return;
+  } else if (m == "setHotkeys") {
+    SetHotkeys(GetBool(a, "enabled", true));
+  } else if (m == "setMediaSession") {
+    SetMediaKey(GetBool(a, "active", false));
+  } else if (m == "urlHandlerReady") {
+    url_ready_ = true;
+    flutter::EncodableList list;
+    for (const auto& u : pending_urls_) list.push_back(flutter::EncodableValue(u));
+    if (!pending_urls_.empty()) BringToFront();
+    pending_urls_.clear();
+    result->Success(flutter::EncodableValue(list));
+    return;
+  } else if (m == "setDefaultDialer") {
+    result->Success(flutter::EncodableValue(SetDefaultDialer()));
+    return;
+  } else if (m == "isDefaultDialer") {
+    result->Success(flutter::EncodableValue(IsDefaultDialer()));
     return;
   } else if (m == "getLaunchAtLogin") {
     bool on = RegGetValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, RRF_RT_REG_SZ, nullptr, nullptr, nullptr) ==
@@ -504,6 +577,84 @@ void NxDesktop::SetSidePanel(bool open, double width) {
   SetWindowPos(window_, nullptr, x, r.top, w, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+void NxDesktop::DeliverUrl(const std::string& url) {
+  if (!url_ready_) {
+    pending_urls_.push_back(url);
+    return;
+  }
+  channel_->InvokeMethod("openUrl", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
+                                        {flutter::EncodableValue("url"), flutter::EncodableValue(url)}}));
+  BringToFront();
+}
+
+namespace {
+bool SetRegString(HKEY root, const std::wstring& path, const wchar_t* name, const std::wstring& value) {
+  HKEY key;
+  if (RegCreateKeyExW(root, path.c_str(), 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return false;
+  LONG r = RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()),
+                          (DWORD)((value.size() + 1) * sizeof(wchar_t)));
+  RegCloseKey(key);
+  return r == ERROR_SUCCESS;
+}
+}  // namespace
+
+// Registra NORYXS como aplicación capaz de abrir tel:/sip:/callto: y abre la página de
+// aplicaciones predeterminadas (desde Windows 8 el usuario debe confirmar la elección).
+bool NxDesktop::SetDefaultDialer() {
+  std::wstring cls = std::wstring(L"Software\\Classes\\") + kUrlProgId;
+  std::wstring cmd = L"\"" + ExePath() + L"\" \"%1\"";
+  bool ok = SetRegString(HKEY_CURRENT_USER, cls, nullptr, L"URL NORYXS") &&
+            SetRegString(HKEY_CURRENT_USER, cls, L"URL Protocol", L"") &&
+            SetRegString(HKEY_CURRENT_USER, cls + L"\\DefaultIcon", nullptr, ExePath() + L",0") &&
+            SetRegString(HKEY_CURRENT_USER, cls + L"\\shell\\open\\command", nullptr, cmd) &&
+            SetRegString(HKEY_CURRENT_USER, kAppKey, L"ApplicationName", L"NORYXS") &&
+            SetRegString(HKEY_CURRENT_USER, kAppKey, L"ApplicationDescription", L"Tel\u00e9fono IP") &&
+            SetRegString(HKEY_CURRENT_USER, std::wstring(kAppKey) + L"\\URLAssociations", L"tel", kUrlProgId) &&
+            SetRegString(HKEY_CURRENT_USER, std::wstring(kAppKey) + L"\\URLAssociations", L"sip", kUrlProgId) &&
+            SetRegString(HKEY_CURRENT_USER, std::wstring(kAppKey) + L"\\URLAssociations", L"callto", kUrlProgId) &&
+            SetRegString(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", L"NORYXS", kAppKey);
+  if (ok) {
+    ShellExecuteW(nullptr, L"open", L"ms-settings:defaultapps?registeredAppUser=NORYXS", nullptr, nullptr, SW_SHOWNORMAL);
+  }
+  return ok;
+}
+
+bool NxDesktop::IsDefaultDialer() const {
+  wchar_t prog[128] = {0};
+  DWORD size = sizeof(prog);
+  if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\tel\\UserChoice",
+                   L"ProgId", RRF_RT_REG_SZ, nullptr, prog, &size) != ERROR_SUCCESS) {
+    return false;
+  }
+  return wcscmp(prog, kUrlProgId) == 0;
+}
+
+// Atajos globales Ctrl+Alt+A / H / M (contestar, colgar, silenciar).
+void NxDesktop::SetHotkeys(bool on) {
+  if (hotkeys_) {
+    for (int id = 1; id <= 3; ++id) UnregisterHotKey(window_, id);
+    hotkeys_ = false;
+  }
+  if (!on) return;
+  const UINT mods = MOD_CONTROL | MOD_ALT | MOD_NOREPEAT;
+  RegisterHotKey(window_, 1, mods, 'A');
+  RegisterHotKey(window_, 2, mods, 'H');
+  RegisterHotKey(window_, 3, mods, 'M');
+  hotkeys_ = true;
+}
+
+// Botón de los cascos (reproducir/pausa): solo mientras hay una llamada sonando o en curso,
+// para no quitarle el control de la música al resto de apps.
+void NxDesktop::SetMediaKey(bool on) {
+  if (on == media_key_) return;
+  if (on) {
+    media_key_ = RegisterHotKey(window_, 10, 0, VK_MEDIA_PLAY_PAUSE) != FALSE;
+  } else {
+    UnregisterHotKey(window_, 10);
+    media_key_ = false;
+  }
+}
+
 void NxDesktop::BringToFront() {
   if (IsIconic(window_)) ShowWindow(window_, SW_RESTORE);
   else ShowWindow(window_, SW_SHOW);
@@ -579,6 +730,23 @@ std::optional<LRESULT> NxDesktop::HandleMessage(HWND hwnd, UINT message, WPARAM 
           return 0;
       }
       return 0;
+    case WM_HOTKEY: {
+      const char* action = wparam == 1 ? "answer" : wparam == 2 ? "hangup" : wparam == 3 ? "mute" : wparam == 10 ? "headset" : nullptr;
+      if (action) {
+        channel_->InvokeMethod("hotkey", std::make_unique<flutter::EncodableValue>(flutter::EncodableMap{
+                                             {flutter::EncodableValue("action"), flutter::EncodableValue(std::string(action))}}));
+      }
+      return 0;
+    }
+    case WM_COPYDATA: {
+      // Una segunda instancia (abierta por un enlace tel:/sip:) nos pasa su enlace
+      auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lparam);
+      if (cds && cds->dwData == kNxUrlCopyData && cds->lpData) {
+        DeliverUrl(std::string(static_cast<const char*>(cds->lpData), cds->cbData));
+        return TRUE;
+      }
+      break;
+    }
     case WM_POWERBROADCAST:
       if (wparam == PBT_APMRESUMEAUTOMATIC) {
         // Tras suspender el equipo: rehacer transportes y registros SIP

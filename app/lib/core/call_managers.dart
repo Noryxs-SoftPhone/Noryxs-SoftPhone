@@ -1,5 +1,6 @@
 // Gestor de sesiones de llamada, transferencias y DTMF.
 import 'dart:async';
+import 'i18n.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -55,13 +56,13 @@ class CallSessionManager extends ChangeNotifier {
     final dest = number.trim();
     if (dest.isEmpty) return null;
     if (line.accId < 0 || line.reg != RegState.registered) {
-      lastError = '${line.label} no está registrada';
+      lastError = tr('{0} no está registrada', [line.label]);
       notifyListeners();
       return null;
     }
     final id = _engine.makeCall(line.accId, dest, holdOthers: true);
     if (id < 0) {
-      lastError = 'No se pudo iniciar la llamada ($id)';
+      lastError = tr('No se pudo iniciar la llamada ({0})', [id]);
       notifyListeners();
       return null;
     }
@@ -98,7 +99,7 @@ class CallSessionManager extends ChangeNotifier {
       final keep = focused ?? liveCalls.where((c) => c.state == CallState.active).firstOrNull;
       if (keep != null) _engine.confSplit(keep.callId);
     } else {
-      if (_engine.confJoin() != 0) lastError = 'Hacen falta dos llamadas establecidas para la conferencia';
+      if (_engine.confJoin() != 0) lastError = tr('Hacen falta dos llamadas establecidas para la conferencia');
     }
     notifyListeners();
   }
@@ -110,7 +111,7 @@ class CallSessionManager extends ChangeNotifier {
     }
     final path = pathFor(c);
     if (_engine.recStart(c.callId, path) != 0) {
-      lastError = 'No se pudo iniciar la grabación';
+      lastError = tr('No se pudo iniciar la grabación');
       notifyListeners();
     }
   }
@@ -200,6 +201,7 @@ class CallSessionManager extends ChangeNotifier {
         if (e.flag('recording')) {
           recordingCallId = e.callId;
           lastRecordingPath = e.str('path');
+          _calls[e.callId]?.recordings.add(e.str('path'));
         } else {
           recordingCallId = null;
         }
@@ -293,9 +295,9 @@ class CallSessionManager extends ChangeNotifier {
   void _onXfer(EngineEvent e) {
     final c = _calls[e.callId];
     if (c == null) return;
-    c.statusText = 'Transferencia: ${e.intv('code')} ${e.str('text')}';
+    c.statusText = tr('Transferencia: {0} {1}', [e.intv('code'), e.str('text')]);
     if (e.flag('final') && e.intv('code') ~/ 100 != 2) {
-      lastError = 'La transferencia falló (${e.intv('code')})';
+      lastError = tr('La transferencia falló ({0})', [e.intv('code')]);
     }
     notifyListeners();
   }

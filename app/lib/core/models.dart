@@ -1,4 +1,5 @@
 import '../engine/sip_engine.dart';
+import 'i18n.dart';
 
 // ---------------------------------------------------------------------------
 // Cuenta SIP (configuración persistente; la contraseña vive en el Llavero)
@@ -18,7 +19,9 @@ class SipAccountConfig {
     this.expires = 300,
     this.srtp = 0,
     this.enabled = true,
-  });
+    this.ringTone = -1,
+    List<String>? queues,
+  }) : queues = queues ?? [];
 
   final String id;
   String name;
@@ -32,6 +35,12 @@ class SipAccountConfig {
   int expires;
   int srtp; // 0 desactivado, 1 opcional, 2 obligatorio
   bool enabled;
+
+  /// Timbre propio de la línea (0 trino, 2 clásico, 3 suave); -1 = el general.
+  int ringTone;
+
+  /// Colas de FreePBX que atiende esta línea (panel "En espera": Atender la pasa a esta extensión).
+  List<String> queues;
 
   String get secretKey => 'sip_password_$id';
   bool get isComplete => username.isNotEmpty && server.isNotEmpty;
@@ -50,6 +59,8 @@ class SipAccountConfig {
         'expires': expires,
         'srtp': srtp,
         'enabled': enabled,
+        'ringTone': ringTone,
+        if (queues.isNotEmpty) 'queues': queues,
       };
 
   factory SipAccountConfig.fromJson(Map<String, dynamic> j) => SipAccountConfig(
@@ -65,6 +76,8 @@ class SipAccountConfig {
         expires: (j['expires'] as num?)?.toInt() ?? 300,
         srtp: (j['srtp'] as num?)?.toInt() ?? 0,
         enabled: j['enabled'] as bool? ?? true,
+        ringTone: (j['ringTone'] as num?)?.toInt() ?? -1,
+        queues: (j['queues'] as List?)?.map((e) => e.toString()).toList(),
       );
 }
 
@@ -72,12 +85,12 @@ enum RegState { unregistered, registering, registered, authError, connectionErro
 
 extension RegStateText on RegState {
   String get label => switch (this) {
-        RegState.unregistered => 'No registrada',
-        RegState.registering => 'Registrando…',
-        RegState.registered => 'Registrada',
-        RegState.authError => 'Error de autenticación',
-        RegState.connectionError => 'Error de conexión',
-        RegState.error => 'Error',
+        RegState.unregistered => tr('No registrada'),
+        RegState.registering => tr('Registrando…'),
+        RegState.registered => tr('Registrada'),
+        RegState.authError => tr('Error de autenticación'),
+        RegState.connectionError => tr('Error de conexión'),
+        RegState.error => tr('Error'),
       };
 }
 
@@ -89,11 +102,11 @@ enum LineStatus { free, ringing, busy, held, disconnected }
 
 extension LineStatusText on LineStatus {
   String get label => switch (this) {
-        LineStatus.free => 'Libre',
-        LineStatus.ringing => 'Sonando',
-        LineStatus.busy => 'Ocupada',
-        LineStatus.held => 'Retenida',
-        LineStatus.disconnected => 'Desconectada',
+        LineStatus.free => tr('Libre'),
+        LineStatus.ringing => tr('Sonando'),
+        LineStatus.busy => tr('Ocupada'),
+        LineStatus.held => tr('Retenida'),
+        LineStatus.disconnected => tr('Desconectada'),
       };
 }
 
@@ -107,7 +120,7 @@ class SipLine {
   String regReason = '';
 
   int get number => index + 1;
-  String get label => 'LÍNEA $number';
+  String get label => tr('LÍNEA {0}', [number]);
   String get extension => account.username.isEmpty ? '—' : account.username;
 }
 
@@ -119,15 +132,15 @@ enum CallState { incoming, outgoing, ringing, connecting, active, held, transfer
 
 extension CallStateText on CallState {
   String get label => switch (this) {
-        CallState.incoming => 'Entrante',
-        CallState.outgoing => 'Llamando…',
-        CallState.ringing => 'Sonando',
-        CallState.connecting => 'Conectando…',
-        CallState.active => 'En conversación',
-        CallState.held => 'Retenida',
-        CallState.transferring => 'Transfiriendo…',
-        CallState.ended => 'Finalizada',
-        CallState.failed => 'Fallida',
+        CallState.incoming => tr('Entrante'),
+        CallState.outgoing => tr('Llamando…'),
+        CallState.ringing => tr('Sonando'),
+        CallState.connecting => tr('Conectando…'),
+        CallState.active => tr('En conversación'),
+        CallState.held => tr('Retenida'),
+        CallState.transferring => tr('Transfiriendo…'),
+        CallState.ended => tr('Finalizada'),
+        CallState.failed => tr('Fallida'),
       };
   bool get isLive => this != CallState.ended && this != CallState.failed;
 }
@@ -152,6 +165,9 @@ class CallSession {
 
   /// Nota rápida y etiquetas escritas durante la llamada (pasan al historial al colgar).
   String note = '';
+
+  /// Ficheros WAV grabados durante esta llamada.
+  final List<String> recordings = [];
   List<String> tags = [];
 
   /// Llamada de servicio a un código de FreePBX (*72, *78…): oculta, sin historial.
@@ -206,8 +222,10 @@ class HistoryEntry {
     required this.durationSec,
     this.note = '',
     List<String>? tags,
+    List<String>? recordings,
   })  : id = id ?? '${start.microsecondsSinceEpoch.toRadixString(36)}-${number.hashCode.toUnsigned(20).toRadixString(36)}',
-        tags = tags ?? [];
+        tags = tags ?? [],
+        recordings = recordings ?? [];
 
   /// Identificador único del registro (une la llamada con su nota y etiquetas).
   final String id;
@@ -223,6 +241,9 @@ class HistoryEntry {
   String note;
   List<String> tags;
 
+  /// Grabaciones de la llamada (rutas a los WAV).
+  final List<String> recordings;
+
   bool get hasContext => note.trim().isNotEmpty || tags.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
@@ -234,6 +255,7 @@ class HistoryEntry {
         'ext': extension,
         'start': start.toIso8601String(),
         'duration': durationSec,
+        if (recordings.isNotEmpty) 'rec': recordings,
       };
   factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
         id: j['id'] as String?,
@@ -244,6 +266,7 @@ class HistoryEntry {
         extension: j['ext'] as String? ?? '',
         start: DateTime.tryParse(j['start'] as String? ?? '') ?? DateTime.now(),
         durationSec: (j['duration'] as num?)?.toInt() ?? 0,
+        recordings: (j['rec'] as List?)?.whereType<String>().toList(),
       );
 }
 

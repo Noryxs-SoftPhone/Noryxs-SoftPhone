@@ -30,6 +30,17 @@
 	<string>NORYXS se conecta a la centralita de tu red local.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>NORYXS necesita el micrófono para las llamadas telefónicas.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>NORYXS</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>noryxs</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

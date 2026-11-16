@@ -10,5 +10,7 @@
 
 void nx_desktop_init(GtkApplication* app, GtkWindow* window, FlView* view);
 void nx_desktop_present(void);
+// Enlace tel:/sip:/callto: recibido (se entrega a Dart en cuanto esté listo).
+void nx_desktop_open_url(const char* uri);
 
 #endif  // RUNNER_NX_DESKTOP_H_

@@ -113,10 +113,37 @@ static gboolean my_application_local_command_line(GApplication* application,
     return TRUE;
   }
 
-  g_application_activate(application);
+  // Clic para llamar: los enlaces tel:/sip:/callto: se entregan con "open" (también a
+  // la instancia que ya esté abierta); el resto de casos, "activate".
+  g_autoptr(GPtrArray) files = g_ptr_array_new_with_free_func(g_object_unref);
+  for (gchar** a = *arguments + 1; a && *a; ++a) {
+    if (g_str_has_prefix(*a, "tel:") || g_str_has_prefix(*a, "sip:") || g_str_has_prefix(*a, "sips:") ||
+        g_str_has_prefix(*a, "callto:") || g_str_has_prefix(*a, "noryxs:")) {
+      g_ptr_array_add(files, g_file_new_for_uri(*a));
+    } else if (g_strcmp0(*a, "--answer") == 0 || g_strcmp0(*a, "--hangup") == 0 || g_strcmp0(*a, "--mute") == 0) {
+      // Atajos de teclado del sistema: "noryxs-terminal --answer" contesta en la instancia abierta
+      g_autofree gchar* uri = g_strdup_printf("noryxs:%s", *a + 2);
+      g_ptr_array_add(files, g_file_new_for_uri(uri));
+    }
+  }
+  if (files->len > 0) {
+    g_application_open(application, reinterpret_cast<GFile**>(files->pdata), (gint)files->len, "");
+  } else {
+    g_application_activate(application);
+  }
   *exit_status = 0;
 
   return TRUE;
+}
+
+// Implements GApplication::open (enlaces tel:/sip:/callto:).
+static void my_application_open(GApplication* application, GFile** files, gint n_files, const gchar* hint) {
+  MyApplication* self = MY_APPLICATION(application);
+  if (self->window == nullptr) g_application_activate(application);
+  for (gint i = 0; i < n_files; ++i) {
+    g_autofree gchar* uri = g_file_get_uri(files[i]);
+    nx_desktop_open_url(uri);
+  }
 }
 
 // Implements GApplication::startup.
@@ -146,6 +173,7 @@ static void my_application_dispose(GObject* object) {
 
 static void my_application_class_init(MyApplicationClass* klass) {
   G_APPLICATION_CLASS(klass)->activate = my_application_activate;
+  G_APPLICATION_CLASS(klass)->open = my_application_open;
   G_APPLICATION_CLASS(klass)->local_command_line =
       my_application_local_command_line;
   G_APPLICATION_CLASS(klass)->startup = my_application_startup;
@@ -164,5 +192,5 @@ MyApplication* my_application_new() {
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     static_cast<GApplicationFlags>(0), nullptr));  // instancia única
+                                     G_APPLICATION_HANDLES_OPEN, nullptr));  // instancia única + enlaces tel:/sip:
 }

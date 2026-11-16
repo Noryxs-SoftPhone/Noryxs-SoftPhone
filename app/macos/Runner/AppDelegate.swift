@@ -19,6 +19,11 @@ class AppDelegate: FlutterAppDelegate {
     return true
   }
 
+  // Clic para llamar: enlaces tel:, sip: y callto: abiertos con NORYXS
+  override func application(_ application: NSApplication, open urls: [URL]) {
+    for u in urls { NxUrlInbox.shared.receive(u.absoluteString) }
+  }
+
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
   }

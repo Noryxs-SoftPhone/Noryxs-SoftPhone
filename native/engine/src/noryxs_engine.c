@@ -14,6 +14,9 @@
 #include "noryxs_engine.h"
 
 #include <pjsua-lib/pjsua.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,7 +60,9 @@ static struct {
     pjsua_conf_port_id ring_slot;
     int            ringing;
     int            dnd;          /* No molestar: rechazar entrantes con 486 */
+    int            dnd_acc[PJSUA_MAX_ACC]; /* No molestar por cuenta (línea) */
     pjsua_recorder_id rec_id;    /* grabación en curso */
+    pjsua_player_id   play_id;   /* reproducción de un WAV (grabaciones, buzón) */
     pjsua_call_id  rec_call;
 } g = { 0 };
 
@@ -441,7 +446,6 @@ static void on_reg_state2(pjsua_acc_id acc_id, pjsua_reg_info *info)
 static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id cid,
                              pjsip_rx_data *rdata)
 {
-    PJ_UNUSED_ARG(acc_id);
     PJ_UNUSED_ARG(rdata);
     lock();
     g.calls[cid].in_use = 1;
@@ -449,8 +453,8 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id cid,
     g.calls[cid].xfer_pending = 0;
     g.calls[cid].conf = 0;
     unlock();
-    if (g.dnd) {
-        /* No molestar: 486 para que FreePBX aplique buzón / desborde */
+    if (g.dnd || (acc_id >= 0 && acc_id < PJSUA_MAX_ACC && g.dnd_acc[acc_id])) {
+        /* No molestar (global o de esa línea): 486 para que FreePBX aplique buzón / desborde */
         emit_call(cid, "dnd_rejected");
         pjsua_call_answer(cid, 486, NULL, NULL);
         return;
@@ -791,6 +795,12 @@ NX_API int32_t nx_init(const nx_engine_config *cfg, nx_event_cb cb)
     pjsua_media_config_default(&mc);
     mc.ec_tail_len = (cfg && cfg->ec_tail_ms >= 0) ? (unsigned)cfg->ec_tail_ms : 200;
     mc.no_vad = PJ_TRUE;
+#if !(defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+    /* Escritorio: cancelador de eco Speex por software siempre (no el de la tarjeta),
+     * que incluye reducción de ruido y control automático de ganancia
+     * (PJMEDIA_SPEEX_AEC_USE_DENOISE / _USE_AGC). En iPhone se usa el de Apple. */
+    mc.ec_options = PJMEDIA_ECHO_SPEEX | PJMEDIA_ECHO_USE_SW_ECHO | PJMEDIA_ECHO_AGGRESSIVENESS_MODERATE;
+#endif
     g.clock_rate = mc.clock_rate ? mc.clock_rate : 16000;
 
     st = pjsua_init(&ua, &lc, &mc);
@@ -828,6 +838,7 @@ NX_API int32_t nx_init(const nx_engine_config *cfg, nx_event_cb cb)
     set_default_codecs();
 
     g.rec_id = PJSUA_INVALID_ID;
+    g.play_id = PJSUA_INVALID_ID;
     g.rec_call = PJSUA_INVALID_ID;
     g.dnd = 0;
 
@@ -1002,6 +1013,7 @@ NX_API int32_t nx_account_add(const nx_account_config *c)
 NX_API int32_t nx_account_remove(int32_t acc_id)
 {
     API_GUARD();
+    if (acc_id >= 0 && acc_id < PJSUA_MAX_ACC) g.dnd_acc[acc_id] = 0;  /* el id se reutiliza */
     return pjsua_acc_del(acc_id) == PJ_SUCCESS ? 0 : -1;
 }
 
@@ -1419,6 +1431,14 @@ NX_API int32_t nx_set_dnd(int32_t on)
     return 0;
 }
 
+NX_API int32_t nx_set_dnd_acc(int32_t acc_id, int32_t on)
+{
+    API_GUARD();
+    if (acc_id < 0 || acc_id >= PJSUA_MAX_ACC) return -10;
+    g.dnd_acc[acc_id] = on ? 1 : 0;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* BLF (Busy Lamp Field)                                               */
 /* ------------------------------------------------------------------ */
@@ -1576,6 +1596,86 @@ NX_API int32_t nx_rec_stop(void)
     emit_simple("rec", "call_id", g.rec_call, NULL, NULL);
     g.rec_call = PJSUA_INVALID_ID;
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reproductor de WAV (grabaciones del historial, mensajes del buzón)  */
+/* Suena por el altavoz (puerto 0); nunca se envía a una llamada.      */
+/* ------------------------------------------------------------------ */
+
+static void play_ms(pjmedia_port *port, pj_ssize_t bytes, int32_t *out)
+{
+    const pjmedia_audio_format_detail *d = pjmedia_format_get_audio_format_detail(&port->info.fmt, PJ_TRUE);
+    unsigned bps = d->clock_rate * d->channel_count * (d->bits_per_sample / 8);
+    *out = bps ? (int32_t)((pj_int64_t)bytes * 1000 / bps) : 0;
+}
+
+static void on_play_eof(pjmedia_port *port, void *usr)
+{
+    PJ_UNUSED_ARG(port);
+    PJ_UNUSED_ARG(usr);
+    emit_simple("play", NULL, 0, "state", "end");
+}
+
+NX_API int32_t nx_play_stop(void)
+{
+    API_GUARD();
+    if (g.play_id == PJSUA_INVALID_ID) return 0;
+    pjsua_player_destroy(g.play_id);
+    g.play_id = PJSUA_INVALID_ID;
+    return 0;
+}
+
+/* Devuelve la duración en ms (>= 0) o un código de error (< 0). */
+NX_API int32_t nx_play_start(const char *path)
+{
+    pj_str_t p;
+    pjmedia_port *port = NULL;
+    pj_ssize_t len;
+    int32_t ms = 0;
+    API_GUARD();
+    if (!path || !path[0]) return -10;
+    nx_play_stop();
+    p = pj_str((char*)path);
+    if (pjsua_player_create(&p, PJMEDIA_FILE_NO_LOOP, &g.play_id) != PJ_SUCCESS) {
+        g.play_id = PJSUA_INVALID_ID;
+        return -12;
+    }
+    if (pjsua_player_get_port(g.play_id, &port) == PJ_SUCCESS && port) {
+        len = pjmedia_wav_player_get_len(port);
+        if (len > 0) play_ms(port, len, &ms);
+        pjmedia_wav_player_set_eof_cb2(port, NULL, &on_play_eof);
+    }
+    pjsua_conf_connect(pjsua_player_get_conf_port(g.play_id), 0);
+    return ms;
+}
+
+/* Posición actual en ms, o -1 si no hay reproducción. */
+NX_API int32_t nx_play_pos(void)
+{
+    pjmedia_port *port = NULL;
+    pj_ssize_t pos;
+    int32_t ms = 0;
+    API_GUARD();
+    if (g.play_id == PJSUA_INVALID_ID) return -1;
+    if (pjsua_player_get_port(g.play_id, &port) != PJ_SUCCESS || !port) return -1;
+    pos = pjmedia_wav_player_port_get_pos(port);
+    if (pos < 0) return -1;
+    play_ms(port, pos, &ms);
+    return ms;
+}
+
+/* Salta a una posición (ms). */
+NX_API int32_t nx_play_seek(int32_t ms)
+{
+    pjmedia_port *port = NULL;
+    const pjmedia_audio_format_detail *d;
+    API_GUARD();
+    if (g.play_id == PJSUA_INVALID_ID) return -1;
+    if (pjsua_player_get_port(g.play_id, &port) != PJ_SUCCESS || !port) return -1;
+    d = pjmedia_format_get_audio_format_detail(&port->info.fmt, PJ_TRUE);
+    return pjmedia_wav_player_port_set_pos(port, (pj_uint32_t)((pj_int64_t)ms * d->clock_rate / 1000 *
+                                           d->channel_count * (d->bits_per_sample / 8))) == PJ_SUCCESS ? 0 : -1;
 }
 
 /* ------------------------------------------------------------------ */

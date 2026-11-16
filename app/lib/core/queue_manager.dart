@@ -3,6 +3,7 @@
 // El usuario AMI es limitado (read=call,agent / write=call): solo puede ver la
 // cola y mover o colgar llamadas en espera. La contraseña vive en el Llavero.
 import 'dart:async';
+import 'i18n.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -21,7 +22,7 @@ class QueueCaller {
   int position;
   bool pickupRequested = false;
 
-  String get display => name.isNotEmpty && name != '<unknown>' && name != number ? name : (number.isEmpty ? 'Número oculto' : number);
+  String get display => name.isNotEmpty && name != '<unknown>' && name != number ? name : (number.isEmpty ? tr('Número oculto') : number);
   Duration get waiting => DateTime.now().difference(joinedAt);
 }
 
@@ -63,6 +64,23 @@ class QueueManager extends ChangeNotifier {
   int _actionSeq = 0;
   bool _disposed = false;
 
+  /// Colas asignadas a las líneas (Ajustes › Líneas SIP). Las da AppController.
+  Iterable<String> Function() lineQueues = () => const [];
+
+  /// Todas las colas vigiladas: las generales de este panel + las de cada línea, sin repetir.
+  List<String> get watched => {...config.queues, ...lineQueues()}.toList();
+
+  /// Las colas de alguna línea cambiaron: volver a pedir el estado.
+  void refreshQueues() {
+    if (state == AmiState.connected) {
+      _setState(AmiState.connected, _connectedText());
+      _snapshot();
+    }
+    notifyListeners();
+  }
+
+  String _connectedText() => watched.isEmpty ? tr('Conectado · sin colas asignadas') : tr('Conectado · {0}', [watched.map((q) => tr('cola {0}', [q])).join(', ')]);
+
   List<QueueCaller> get callers => _callers.values.toList()..sort((a, b) => a.joinedAt.compareTo(b.joinedAt));
   bool get hasPassword => (_engine.secretGet(_secretKey) ?? '').isNotEmpty;
 
@@ -89,15 +107,15 @@ class QueueManager extends ChangeNotifier {
   Future<void> connect() async {
     _reconnect?.cancel();
     if (!config.enabled || config.host.isEmpty) {
-      _setState(AmiState.disabled, 'Desactivado');
+      _setState(AmiState.disabled, tr('Desactivado'));
       return;
     }
     final pwd = _engine.secretGet(_secretKey) ?? '';
     if (pwd.isEmpty) {
-      _setState(AmiState.authError, 'Falta la contraseña AMI');
+      _setState(AmiState.authError, tr('Falta la contraseña AMI'));
       return;
     }
-    _setState(AmiState.connecting, 'Conectando con ${config.host}…');
+    _setState(AmiState.connecting, tr('Conectando con {0}…', [config.host]));
     try {
       final s = await Socket.connect(config.host, config.port, timeout: const Duration(seconds: 6));
       _sock = s;
@@ -105,7 +123,7 @@ class QueueManager extends ChangeNotifier {
       s.cast<List<int>>().transform(utf8.decoder).listen(_onData, onDone: _onClosed, onError: (_) => _onClosed());
       _send({'Action': 'Login', 'Username': config.user, 'Secret': pwd, 'Events': 'call,agent'}, id: 'login');
     } catch (e) {
-      _setState(AmiState.error, 'Sin conexión AMI (${config.host}:${config.port})');
+      _setState(AmiState.error, tr('Sin conexión AMI ({0}:{1})', [config.host, config.port]));
       _scheduleReconnect();
     }
   }
@@ -126,7 +144,7 @@ class QueueManager extends ChangeNotifier {
     _keepalive?.cancel();
     if (_disposed) return;
     if (state != AmiState.authError) {
-      _setState(AmiState.error, 'Conexión AMI perdida · reintentando');
+      _setState(AmiState.error, tr('Conexión AMI perdida · reintentando'));
       _scheduleReconnect();
     }
   }
@@ -176,14 +194,14 @@ class QueueManager extends ChangeNotifier {
   void _onMessage(Map<String, String> m) {
     if (m['ActionID'] == 'login') {
       if (m['Response'] == 'Success') {
-        _setState(AmiState.connected, 'Conectado · ${config.queues.map((q) => 'cola $q').join(', ')}');
+        _setState(AmiState.connected, _connectedText());
         _snapshot();
         _keepalive = Timer.periodic(const Duration(seconds: 25), (_) {
           _send({'Action': 'Ping'});
           _snapshot(); // corrige posibles desfases
         });
       } else {
-        _setState(AmiState.authError, 'Usuario o contraseña AMI incorrectos');
+        _setState(AmiState.authError, tr('Usuario o contraseña AMI incorrectos'));
         disconnect();
         state = AmiState.authError;
       }
@@ -192,7 +210,7 @@ class QueueManager extends ChangeNotifier {
     final ev = m['Event'];
     if (ev == null) return;
     final q = m['Queue'] ?? '';
-    if (q.isNotEmpty && !config.queues.contains(q)) return;
+    if (q.isNotEmpty && !watched.contains(q)) return;
     switch (ev) {
       case 'QueueEntry': // respuesta a QueueStatus
         final ch = m['Channel'] ?? '';
@@ -243,7 +261,7 @@ class QueueManager extends ChangeNotifier {
 
   void _snapshot() {
     _snapshotSeen.clear();
-    for (final q in config.queues) {
+    for (final q in watched) {
       _send({'Action': 'QueueStatus', 'Queue': q});
     }
   }

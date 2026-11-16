@@ -10,12 +10,22 @@ PKGPJ  := PKG_CONFIG_PATH=$(PJ)/lib/pkgconfig pkg-config
 # fuentes no existe (PJSIP restaurado de caché) esas rutas no resuelven. Se limpian.
 PJFIX  := sed -e "s\#/pjproject/\.\./\#/\#g"
 
+# Transcripción local (opcional): si third_party/whisper.cpp/build existe (packaging/compilar_whisper.sh)
+# se enlaza; si no, el motor se compila sin nx_transcribe y la app oculta la función.
+WH     := $(ROOT)/third_party/whisper.cpp
+WH_LIB := $(firstword $(wildcard $(WH)/build/src/libwhisper.a))
+ifneq ($(WH_LIB),)
+WH_A   := $(WH)/build/src/libwhisper.a $(WH)/build/ggml/src/libggml.a $(WH)/build/ggml/src/libggml-cpu.a $(WH)/build/ggml/src/libggml-base.a
+WH_CF  := -I$(WH)/include -I$(WH)/ggml/include
+WH_O   := build-linux/nx_transcribe.o
+endif
+
 CC     ?= gcc
-CFLAGS := -O2 -Wall -fPIC -fvisibility=hidden -Iinclude \
+CFLAGS := $(WH_CF) -O2 -Wall -fPIC -fvisibility=hidden -Iinclude \
           -I$(PJ)/include $(shell $(PKGPJ) --cflags libpjproject | $(PJFIX)) $(shell pkg-config --cflags libsecret-1)
 LIBS   := -L$(PJ)/lib $(shell $(PKGPJ) --libs --static libpjproject | $(PJFIX)) $(shell pkg-config --libs libsecret-1) -lm -lpthread
 
-OBJS := build-linux/noryxs_engine.o build-linux/nx_secret_portable.o
+OBJS := build-linux/noryxs_engine.o build-linux/nx_secret_portable.o $(WH_O)
 
 all: build-linux/libnoryxs_engine.so build-linux/nx_cli
 
@@ -24,7 +34,7 @@ build-linux/%.o: src/%.c include/noryxs_engine.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 build-linux/libnoryxs_engine.so: $(OBJS)
-	$(CC) -shared -o $@ $(OBJS) -Wl,--no-undefined -Wl,-soname,libnoryxs_engine.so $(LIBS)
+	$(CC) -shared -o $@ $(OBJS) $(WH_A) -Wl,--no-undefined -Wl,-soname,libnoryxs_engine.so $(LIBS) $(if $(WH_A),-lstdc++)
 
 build-linux/nx_cli: tools/nx_cli.c build-linux/libnoryxs_engine.so
 	$(CC) -O2 -Wall -Iinclude $< -Lbuild-linux -lnoryxs_engine -Wl,-rpath,'$$ORIGIN' -o $@

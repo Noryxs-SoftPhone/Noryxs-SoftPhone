@@ -57,6 +57,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    # Modelo de transcripción (whisper Base q5_1). No se versiona: lo descarga
+    # packaging/descargar_modelo.sh (y la CI).
+    - assets/models/
+
   fonts:
     - family: Inter
       fonts:

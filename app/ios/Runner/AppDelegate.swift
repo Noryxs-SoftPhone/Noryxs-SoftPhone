@@ -33,6 +33,12 @@ import UserNotifications
       case "incomingCall": self?.incomingCall(args)
       case "updateCall": self?.updateCall(args)
       case "callHandled": self?.callHandled(args)
+      case "openExternal":
+        if let s = args["url"] as? String, let u = URL(string: s) { UIApplication.shared.open(u) }
+      case "urlHandlerReady":
+        NxUrlInbox.shared.deliver = { [weak self] url in self?.channel?.invokeMethod("openUrl", arguments: ["url": url]) }
+        result(NxUrlInbox.shared.takePending())
+        return
       default: break
       }
       result(nil)

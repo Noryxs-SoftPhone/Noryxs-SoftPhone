@@ -298,3 +298,82 @@ NX_API char *nx_unseal(const char *sealed)
     out[plen] = '\0';
     return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Cifrado con PIN (configuración de puestos)                          */
+/* ------------------------------------------------------------------ */
+#define NX_PIN_ITER 200000
+
+static int pin_key(const char *pin, const unsigned char salt[16], unsigned char key[64]);
+static int pin_rand(unsigned char *buf, size_t n);
+static int pin_aes(int enc, const unsigned char *key, const unsigned char *iv,
+                   const unsigned char *in, size_t n, unsigned char *out, size_t *outlen);
+static void pin_hmac(const unsigned char *key, const unsigned char *data, size_t n, unsigned char mac[32]);
+
+NX_API char *nx_pin_seal(const char *plain, const char *pin)
+{
+    unsigned char key[64], mac[32], *buf;
+    size_t pn, ctlen = 0;
+    char *b64, *out;
+    if (!plain || !pin || !pin[0]) return NULL;
+    pn = strlen(plain);
+    buf = (unsigned char*)malloc(32 + pn + 16 + 32);
+    if (!buf || pin_rand(buf, 32) != 0) { free(buf); return NULL; }   /* sal + IV */
+    if (pin_key(pin, buf, key) != 0 ||
+        pin_aes(1, key, buf + 16, (const unsigned char*)plain, pn, buf + 32, &ctlen) != 0) {
+        memset(key, 0, sizeof(key)); free(buf); return NULL;
+    }
+    pin_hmac(key + 32, buf, 32 + ctlen, mac);
+    memcpy(buf + 32 + ctlen, mac, 32);
+    memset(key, 0, sizeof(key));
+    b64 = b64_encode(buf, 32 + ctlen + 32);
+    free(buf);
+    if (!b64) return NULL;
+    out = (char*)malloc(strlen(b64) + 6);
+    if (out) { memcpy(out, "SSP1:", 5); strcpy(out + 5, b64); }
+    free(b64);
+    return out;
+}
+
+NX_API char *nx_pin_unseal(const char *sealed, const char *pin)
+{
+    unsigned char key[64], mac[32], *raw;
+    size_t n = 0, ctlen, plen = 0;
+    char *out;
+    int diff = 0, i;
+    if (!sealed || !pin || strncmp(sealed, "SSP1:", 5) != 0) return NULL;
+    raw = b64_decode(sealed + 5, &n);
+    if (!raw || n < 32 + 16 + 32) { free(raw); return NULL; }
+    if (pin_key(pin, raw, key) != 0) { free(raw); return NULL; }
+    ctlen = n - 32 - 32;
+    pin_hmac(key + 32, raw, 32 + ctlen, mac);
+    for (i = 0; i < 32; ++i) diff |= mac[i] ^ raw[32 + ctlen + i];
+    if (diff) { memset(key, 0, sizeof(key)); free(raw); return NULL; }   /* PIN incorrecto */
+    out = (char*)malloc(ctlen + 1);
+    if (!out || pin_aes(0, key, raw + 16, raw + 32, ctlen, (unsigned char*)out, &plen) != 0) {
+        memset(key, 0, sizeof(key)); free(raw); free(out); return NULL;
+    }
+    memset(key, 0, sizeof(key));
+    free(raw);
+    out[plen] = '\0';
+    return out;
+}
+
+static int pin_key(const char *pin, const unsigned char salt[16], unsigned char key[64])
+{
+    return PKCS5_PBKDF2_HMAC(pin, (int)strlen(pin), salt, 16, NX_PIN_ITER, EVP_sha256(), 64, key) == 1 ? 0 : -1;
+}
+static int pin_rand(unsigned char *buf, size_t n)
+{
+    return RAND_bytes(buf, (int)n) == 1 ? 0 : -1;
+}
+static int pin_aes(int enc, const unsigned char *key, const unsigned char *iv,
+                   const unsigned char *in, size_t n, unsigned char *out, size_t *outlen)
+{
+    return aes_cbc(enc, key, iv, in, n, out, outlen);
+}
+static void pin_hmac(const unsigned char *key, const unsigned char *data, size_t n, unsigned char mac[32])
+{
+    unsigned int l = 0;
+    HMAC(EVP_sha256(), key, 32, data, n, mac, &l);
+}

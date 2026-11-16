@@ -32,7 +32,8 @@ cat > "$ROOT/usr/share/applications/$APPID.desktop" <<DESKTOP
 Type=Application
 Name=$NAME
 Comment=$DESC
-Exec=/opt/$PKG/$BIN
+Exec=/opt/$PKG/$BIN %u
+MimeType=x-scheme-handler/tel;x-scheme-handler/sip;x-scheme-handler/callto;x-scheme-handler/noryxs;
 Icon=$PKG
 Terminal=false
 Categories=Network;Telephony;

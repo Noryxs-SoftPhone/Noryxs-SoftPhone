@@ -17,3 +17,4 @@ native/engine/build-ios/
 .DS_Store
 native/engine/build-linux/
 native/engine/build-win/
+app/assets/models/*.bin

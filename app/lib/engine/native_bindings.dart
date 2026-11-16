@@ -79,6 +79,7 @@ class NativeEngine {
     networkChanged = _lib.lookupFunction<Int32 Function(), int Function()>('nx_network_changed');
     dumpState = _str0('nx_dump_state');
     setDnd = _i1('nx_set_dnd');
+    setDndAcc = _i2('nx_set_dnd_acc');
     blfAdd = _is('nx_blf_add');
     blfRemove = _i1('nx_blf_remove');
     blfRefresh = _i1('nx_blf_refresh');
@@ -86,12 +87,40 @@ class NativeEngine {
     confSplit = _i1('nx_conf_split');
     recStart = _is('nx_rec_start');
     recStop = _lib.lookupFunction<Int32 Function(), int Function()>('nx_rec_stop');
+    playStart = _lib.lookupFunction<Int32 Function(Pointer<Uint8>), int Function(Pointer<Uint8>)>('nx_play_start');
+    playStop = _lib.lookupFunction<Int32 Function(), int Function()>('nx_play_stop');
+    playPos = _lib.lookupFunction<Int32 Function(), int Function()>('nx_play_pos');
+    playSeek = _i1('nx_play_seek');
     callStats = _lib.lookupFunction<Pointer<Uint8> Function(Int32), Pointer<Uint8> Function(int)>('nx_call_stats');
     _seal = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>), Pointer<Uint8> Function(Pointer<Uint8>)>('nx_seal');
     _unseal = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>), Pointer<Uint8> Function(Pointer<Uint8>)>('nx_unseal');
+    _pinSeal = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>), Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>)>('nx_pin_seal');
+    _pinUnseal = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>), Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>)>('nx_pin_unseal');
     _secretSet = _lib.lookupFunction<Int32 Function(Pointer<Uint8>, Pointer<Uint8>), int Function(Pointer<Uint8>, Pointer<Uint8>)>('nx_secret_set');
     _secretGet = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>), Pointer<Uint8> Function(Pointer<Uint8>)>('nx_secret_get');
     _secretDelete = _lib.lookupFunction<Int32 Function(Pointer<Uint8>), int Function(Pointer<Uint8>)>('nx_secret_delete');
+    if (_lib.providesSymbol('nx_transcribe')) {
+      _transcribe = _lib.lookupFunction<Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, Int32),
+          Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, int)>('nx_transcribe');
+    }
+  }
+
+  /// Transcripción local (whisper.cpp). null en plataformas sin ella (iOS).
+  Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint8>, int)? _transcribe;
+  bool get canTranscribe => _transcribe != null;
+
+  /// Bloqueante (segundos): llamar desde un Isolate.
+  String? transcribe(String wav, String model, {String lang = 'auto', int threads = 4}) {
+    final fn = _transcribe;
+    if (fn == null) return null;
+    final w = cstr(wav), m = cstr(model), l = cstr(lang);
+    try {
+      return takeString(fn(w, m, l, threads));
+    } finally {
+      free(w);
+      free(m);
+      free(l);
+    }
   }
 
   static NativeEngine? _instance;
@@ -149,6 +178,7 @@ class NativeEngine {
   late final int Function() networkChanged;
   late final Pointer<Uint8> Function() dumpState;
   late final int Function(int) setDnd;
+  late final int Function(int, int) setDndAcc;
   late final int Function(int, Pointer<Uint8>) blfAdd;
   late final int Function(int) blfRemove;
   late final int Function(int) blfRefresh;
@@ -156,8 +186,14 @@ class NativeEngine {
   late final int Function(int) confSplit;
   late final int Function(int, Pointer<Uint8>) recStart;
   late final int Function() recStop;
+  late final int Function(Pointer<Uint8>) playStart;
+  late final int Function() playStop;
+  late final int Function() playPos;
+  late final int Function(int) playSeek;
   late final Pointer<Uint8> Function(int) callStats;
   late final Pointer<Uint8> Function(Pointer<Uint8>) _seal;
+  late final Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>) _pinSeal;
+  late final Pointer<Uint8> Function(Pointer<Uint8>, Pointer<Uint8>) _pinUnseal;
   late final Pointer<Uint8> Function(Pointer<Uint8>) _unseal;
   late final int Function(Pointer<Uint8>, Pointer<Uint8>) _secretSet;
   late final Pointer<Uint8> Function(Pointer<Uint8>) _secretGet;
@@ -222,6 +258,28 @@ class NativeEngine {
       return takeString(_seal(p));
     } finally {
       freeSecret(p);
+    }
+  }
+
+  /// Cifra con un PIN (paquetes de configuración de puestos).
+  String? pinSeal(String plain, String pin) {
+    final p = cstr(plain), k = cstr(pin);
+    try {
+      return takeString(_pinSeal(p, k));
+    } finally {
+      freeSecret(p);
+      freeSecret(k);
+    }
+  }
+
+  /// null si el PIN es incorrecto o el paquete está manipulado.
+  String? pinUnseal(String sealed, String pin) {
+    final p = cstr(sealed), k = cstr(pin);
+    try {
+      return takeString(_pinUnseal(p, k));
+    } finally {
+      free(p);
+      freeSecret(k);
     }
   }
 

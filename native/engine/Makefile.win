@@ -11,12 +11,22 @@ PKGPJ  := PKG_CONFIG_PATH=$(PJ)/lib/pkgconfig pkg-config
 # fuentes no existe (PJSIP restaurado de caché) esas rutas no resuelven. Se limpian.
 PJFIX  := sed -e "s\#/pjproject/\.\./\#/\#g"
 
+# Transcripción local (opcional): si third_party/whisper.cpp/build existe (packaging/compilar_whisper.sh)
+# se enlaza; si no, el motor se compila sin nx_transcribe y la app oculta la función.
+WH     := $(ROOT)/third_party/whisper.cpp
+WH_LIB := $(firstword $(wildcard $(WH)/build/src/libwhisper.a))
+ifneq ($(WH_LIB),)
+WH_A   := $(WH)/build/src/libwhisper.a $(WH)/build/ggml/src/libggml.a $(WH)/build/ggml/src/libggml-cpu.a $(WH)/build/ggml/src/libggml-base.a
+WH_CF  := -I$(WH)/include -I$(WH)/ggml/include
+WH_O   := build-win/nx_transcribe.o
+endif
+
 CC     ?= gcc
-CFLAGS := -O2 -Wall -Wno-error=incompatible-pointer-types -Iinclude -D_WIN32_WINNT=0x0601 -I$(PJ)/include $(shell $(PKGPJ) --cflags libpjproject | $(PJFIX))
+CFLAGS := $(WH_CF) -O2 -Wall -Wno-error=incompatible-pointer-types -Iinclude -D_WIN32_WINNT=0x0601 -I$(PJ)/include $(shell $(PKGPJ) --cflags libpjproject | $(PJFIX))
 LIBS   := -L$(PJ)/lib $(shell $(PKGPJ) --libs --static libpjproject | $(PJFIX)) \
           -ladvapi32 -lcrypt32 -lbcrypt -lws2_32 -liphlpapi -lwinmm -lole32 -luuid -lgdi32 -luser32
 
-OBJS := build-win/noryxs_engine.o build-win/nx_secret_portable.o
+OBJS := build-win/noryxs_engine.o build-win/nx_secret_portable.o $(WH_O)
 
 all: build-win/noryxs_engine.dll
 
@@ -25,7 +35,7 @@ build-win/%.o: src/%.c include/noryxs_engine.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 build-win/noryxs_engine.dll: $(OBJS)
-	$(CC) -shared -static -static-libgcc -o $@ $(OBJS) $(LIBS) -Wl,--out-implib,build-win/libnoryxs_engine.dll.a
+	$(CC) -shared -static -static-libgcc -o $@ $(OBJS) $(WH_A) $(LIBS) $(if $(WH_A),-static-libstdc++ -lstdc++) -Wl,--out-implib,build-win/libnoryxs_engine.dll.a
 
 clean:
 	rm -rf build-win
