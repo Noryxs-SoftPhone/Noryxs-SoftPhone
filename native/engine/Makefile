@@ -13,9 +13,9 @@ OPUS      ?= $(shell brew --prefix opus 2>/dev/null || echo /opt/homebrew/opt/op
 # Transcripción local: whisper.cpp compilado en third_party/whisper.cpp/build (estático)
 WH        := $(ROOT)/third_party/whisper.cpp
 # Opcional: sin compilar (packaging/compilar_whisper.sh) el motor sale sin nx_transcribe.
-ifneq ($(wildcard $(WH)/build/src/libwhisper.a),)
-WH_A      := $(WH)/build/src/libwhisper.a $(WH)/build/ggml/src/libggml.a $(WH)/build/ggml/src/libggml-base.a \
-             $(WH)/build/ggml/src/libggml-cpu.a $(wildcard $(WH)/build/ggml/src/ggml-blas/libggml-blas.a)
+ifneq ($(wildcard $(WH)/build/libs/libwhisper.a),)
+WH_A      := $(WH)/build/libs/libwhisper.a $(WH)/build/libs/libggml.a $(WH)/build/libs/libggml-base.a \
+             $(WH)/build/libs/libggml-cpu.a $(wildcard $(WH)/build/libs/libggml-blas.a)
 WH_O      := build/nx_transcribe.o
 endif
 

@@ -14,7 +14,10 @@ Formato: cambios agrupados por fecha, del más reciente al más antiguo. Cada en
 - **Segundo fallo (127 tras el `git clone` de whisper.cpp)**: el `cmake` de MSYS2 dejaba de funcionar sin dar mensaje.
   - Causa probable: el paso que baja OpenSSL de 4.x a 3.6 (necesario para PJSIP 2.17) quita la DLL de OpenSSL 4 que necesita cmake.
   - Solución: whisper.cpp y el modelo se preparan **antes** de bajar OpenSSL. `compilar_whisper.sh` comprueba primero que cmake arranca y, si no, lo dice claramente.
-- **Prueba**: pendiente del siguiente job de Windows.
+- **Tercer fallo (enlace del motor)**: `ld: cannot find .../whisper.cpp/build/ggml/src/libggml.a`. En Windows CMake deja las bibliotecas de ggml en otra carpeta.
+  - Solución: `compilar_whisper.sh` copia `whisper`, `ggml`, `ggml-cpu`, `ggml-base` (y `ggml-blas` si existe) a `build/libs` con nombre fijo, y avisa si falta alguna.
+  - Los tres Makefiles enlazan desde ahí; en Linux y Windows dentro de `--start-group … --end-group`, para que no importe el orden.
+- **Prueba**: en macOS, whisper recompilado desde cero con el script nuevo, motor enlazado y transcripción correcta. Windows y Linux, pendientes del siguiente job.
 
 ## 16/11/2026 — Fase 8: mejoras
 

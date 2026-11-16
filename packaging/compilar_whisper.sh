@@ -20,4 +20,12 @@ cmake -S "$WH" -B "$WH/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
   -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF \
   -DGGML_METAL=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON "${EXTRA[@]}"
 cmake --build "$WH/build" --config Release -j 8
+# Las bibliotecas acaban en carpetas distintas según el sistema y el generador (en Windows
+# no están en build/ggml/src): se copian todas a build/libs con nombre fijo para los Makefiles.
+mkdir -p "$WH/build/libs"
+for n in whisper ggml ggml-cpu ggml-base ggml-blas; do
+  f=$(find "$WH/build" -path "$WH/build/libs" -prune -o \( -name "lib$n.a" -o -name "$n.a" -o -name "$n.lib" \) -type f -print | head -1)
+  if [ -n "$f" ]; then cp "$f" "$WH/build/libs/lib$n.a"; elif [ "$n" != ggml-blas ]; then echo "ERROR: no se encuentra la biblioteca $n"; find "$WH/build" -name "*.a"; exit 1; fi
+done
+ls -l "$WH/build/libs"
 echo "whisper.cpp listo en $WH/build"
