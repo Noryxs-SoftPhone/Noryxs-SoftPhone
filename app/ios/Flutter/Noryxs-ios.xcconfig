@@ -1,0 +1,6 @@
+// Enlaza el motor NORYXS (PJSIP iOS) dentro del ejecutable; Dart lo usa con DynamicLibrary.process().
+NORYXS_ENGINE_IOS = $(PROJECT_DIR)/../../native/engine/build-ios/libnoryxs_engine.a
+OTHER_LDFLAGS = $(inherited) -force_load $(NORYXS_ENGINE_IOS) -framework AudioToolbox -framework AVFoundation -framework CoreAudio -framework CFNetwork -framework UIKit -framework Security -framework CoreFoundation -lm
+// Conservar los símbolos globales para que dlsym() encuentre nx_* en Release
+STRIP_STYLE = non-global
+DEAD_CODE_STRIPPING = NO

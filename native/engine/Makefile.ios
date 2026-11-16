@@ -1,0 +1,24 @@
+# NORYXS engine - biblioteca estática para iPhone (arm64)
+ROOT     := $(abspath ../..)
+PJ       := $(ROOT)/third_party/pjsip-install-ios
+TRIPLE   := aarch64-apple-darwin_ios
+SDK      := $(shell xcrun --sdk iphoneos --show-sdk-path)
+CC       := $(shell xcrun --sdk iphoneos -f clang)
+CFLAGS   := -O2 -Wall -fPIC -fvisibility=hidden -arch arm64 -isysroot $(SDK) -miphoneos-version-min=15.0 \
+            -Iinclude -I$(PJ)/include -DPJ_AUTOCONF=1 -DPJ_IS_BIG_ENDIAN=0 -DPJ_IS_LITTLE_ENDIAN=1
+PJLIBS   := pjsua pjsip-ua pjsip-simple pjsip pjmedia-codec pjmedia-audiodev pjmedia pjnath pjlib-util srtp resample speex g7221codec gsmcodec ilbccodec pj
+PJ_A     := $(foreach l,$(PJLIBS),$(PJ)/lib/lib$(l)-$(TRIPLE).a)
+OBJS     := build-ios/noryxs_engine.o build-ios/nx_secret_mac.o
+
+all: build-ios/libnoryxs_engine.a
+
+build-ios/%.o: src/%.c include/noryxs_engine.h
+	@mkdir -p build-ios
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build-ios/libnoryxs_engine.a: $(OBJS)
+	libtool -static -o $@ $(OBJS) $(PJ_A) 2>/dev/null
+
+clean:
+	rm -rf build-ios
+.PHONY: all clean

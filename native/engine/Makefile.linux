@@ -1,0 +1,35 @@
+# NORYXS Terminal engine - Linux (x86_64/arm64)
+# Requisitos: PJSIP instalado en third_party/pjsip-install (configure con CFLAGS="-O2 -fPIC"),
+#             libssl-dev, libopus-dev, libasound2-dev, libsecret-1-dev, pkg-config.
+# Genera build-linux/libnoryxs_engine.so (se empaqueta junto a la app Flutter) y nx_cli.
+
+ROOT   := $(abspath ../..)
+PJ     := $(ROOT)/third_party/pjsip-install
+PKGPJ  := PKG_CONFIG_PATH=$(PJ)/lib/pkgconfig pkg-config
+# El .pc de PJSIP guarda rutas tipo ".../pjproject/../pjsip-install": si la carpeta de
+# fuentes no existe (PJSIP restaurado de caché) esas rutas no resuelven. Se limpian.
+PJFIX  := sed -e "s\#/pjproject/\.\./\#/\#g"
+
+CC     ?= gcc
+CFLAGS := -O2 -Wall -fPIC -fvisibility=hidden -Iinclude \
+          -I$(PJ)/include $(shell $(PKGPJ) --cflags libpjproject | $(PJFIX)) $(shell pkg-config --cflags libsecret-1)
+LIBS   := -L$(PJ)/lib $(shell $(PKGPJ) --libs --static libpjproject | $(PJFIX)) $(shell pkg-config --libs libsecret-1) -lm -lpthread
+
+OBJS := build-linux/noryxs_engine.o build-linux/nx_secret_portable.o
+
+all: build-linux/libnoryxs_engine.so build-linux/nx_cli
+
+build-linux/%.o: src/%.c include/noryxs_engine.h
+	@mkdir -p build-linux
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build-linux/libnoryxs_engine.so: $(OBJS)
+	$(CC) -shared -o $@ $(OBJS) -Wl,--no-undefined -Wl,-soname,libnoryxs_engine.so $(LIBS)
+
+build-linux/nx_cli: tools/nx_cli.c build-linux/libnoryxs_engine.so
+	$(CC) -O2 -Wall -Iinclude $< -Lbuild-linux -lnoryxs_engine -Wl,-rpath,'$$ORIGIN' -o $@
+
+clean:
+	rm -rf build-linux
+
+.PHONY: all clean

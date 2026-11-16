@@ -1,0 +1,7 @@
+// Enlaza el motor telefónico nativo (PJSIP + OpenSSL + Opus) dentro del ejecutable.
+// Dart lo usa con DynamicLibrary.process().
+NORYXS_ENGINE = $(PROJECT_DIR)/../../native/engine/build/libnoryxs_engine.a
+OTHER_LDFLAGS = $(inherited) -force_load $(NORYXS_ENGINE) -framework CoreAudio -framework CoreServices -framework AudioUnit -framework AudioToolbox -framework Security -framework CoreFoundation -lm
+
+// Solo Apple Silicon: OpenSSL/Opus de Homebrew son arm64
+ARCHS = arm64

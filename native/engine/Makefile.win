@@ -1,0 +1,33 @@
+# NORYXS Terminal engine - Windows x64 (MSYS2 UCRT64 / MinGW-w64)
+# Requisitos (pacman): mingw-w64-ucrt-x86_64-{gcc,openssl,opus,pkgconf}, make.
+# PJSIP instalado en third_party/pjsip-install (configure dentro de MSYS2 UCRT64).
+# Genera build-win/noryxs_engine.dll autocontenida (PJSIP, OpenSSL, Opus y runtime
+# de GCC enlazados estáticamente): basta con copiarla junto a noryxs_terminal.exe.
+
+ROOT   := $(abspath ../..)
+PJ     := $(ROOT)/third_party/pjsip-install
+PKGPJ  := PKG_CONFIG_PATH=$(PJ)/lib/pkgconfig pkg-config
+# El .pc de PJSIP guarda rutas tipo ".../pjproject/../pjsip-install": si la carpeta de
+# fuentes no existe (PJSIP restaurado de caché) esas rutas no resuelven. Se limpian.
+PJFIX  := sed -e "s\#/pjproject/\.\./\#/\#g"
+
+CC     ?= gcc
+CFLAGS := -O2 -Wall -Wno-error=incompatible-pointer-types -Iinclude -D_WIN32_WINNT=0x0601 -I$(PJ)/include $(shell $(PKGPJ) --cflags libpjproject | $(PJFIX))
+LIBS   := -L$(PJ)/lib $(shell $(PKGPJ) --libs --static libpjproject | $(PJFIX)) \
+          -ladvapi32 -lcrypt32 -lbcrypt -lws2_32 -liphlpapi -lwinmm -lole32 -luuid -lgdi32 -luser32
+
+OBJS := build-win/noryxs_engine.o build-win/nx_secret_portable.o
+
+all: build-win/noryxs_engine.dll
+
+build-win/%.o: src/%.c include/noryxs_engine.h
+	@mkdir -p build-win
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build-win/noryxs_engine.dll: $(OBJS)
+	$(CC) -shared -static -static-libgcc -o $@ $(OBJS) $(LIBS) -Wl,--out-implib,build-win/libnoryxs_engine.dll.a
+
+clean:
+	rm -rf build-win
+
+.PHONY: all clean
